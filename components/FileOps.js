@@ -5,6 +5,7 @@ import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp'])
+const MEDIA_TYPES = new Set(['image', 'video', 'file', 'record', 'audio'])
 
 async function getFetch() {
   if (globalThis.fetch) return globalThis.fetch.bind(globalThis)
@@ -20,6 +21,13 @@ function guessMimeType(filename, fallback = 'application/octet-stream') {
     '.jpeg': 'image/jpeg',
     '.gif': 'image/gif',
     '.webp': 'image/webp',
+    '.mp4': 'video/mp4',
+    '.webm': 'video/webm',
+    '.mov': 'video/quicktime',
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+    '.ogg': 'audio/ogg',
+    '.silk': 'audio/silk',
     '.txt': 'text/plain',
     '.md': 'text/markdown',
     '.json': 'application/json',
@@ -53,35 +61,85 @@ function normalizeUrl(raw) {
   return /^https?:\/\//i.test(value) ? value : ''
 }
 
-export function extractUploadSources(e) {
+function normalizeInlineData(raw) {
+  if (!raw || typeof raw !== 'string') return ''
+  const value = raw.trim()
+  return /^(base64:\/\/|data:[^;]+;base64,)/i.test(value) ? value : ''
+}
+
+async function getQuotedMessages(e) {
+  try {
+    if (e?.reply_id && typeof e.getReply === 'function') {
+      const reply = await e.getReply(e.reply_id)
+      if (Array.isArray(reply)) return reply
+      return Array.isArray(reply?.message) ? reply.message : []
+    }
+  } catch (err) {
+    logger.debug(`[hapi-connector] 获取 reply_id 引用消息失败: ${err.message || err}`)
+  }
+
+  try {
+    if (!e?.source) return []
+    const history = e.isGroup
+      ? await e.group?.getChatHistory?.(e.source.seq, 1)
+      : await e.friend?.getChatHistory?.(e.source.time, 1)
+    const message = Array.isArray(history) ? history.pop()?.message : null
+    return Array.isArray(message) ? message : []
+  } catch (err) {
+    logger.debug(`[hapi-connector] 获取 source 引用消息失败: ${err.message || err}`)
+    return []
+  }
+}
+
+function pushItemSource(sources, seen, item) {
+  if (!item || typeof item !== 'object') return
+  if (!MEDIA_TYPES.has(item.type)) return
+
+  const name = item.name || item.filename || item.file_name || item.fileName || item.file || ''
+  const mimeType = item.mimeType || item.mime_type || item.contentType || item.content_type || ''
+  const fileValue = item.file || item.url || item.path || item.localPath || ''
+  const candidates = [item.path, item.localPath, item.local_path, item.file]
+  const localPath = candidates.map(normalizeLocalPath).find(Boolean)
+  const url = [item.url, item.file, item.href].map(normalizeUrl).find(Boolean)
+  const inlineData = [item.file, item.url, item.data].map(normalizeInlineData).find(Boolean)
+
+  const cleanName = name && !/[\\/]/.test(name) && !/^https?:\/\//i.test(name) ? name : ''
+  const source = localPath
+    ? { kind: 'path', path: localPath, name: cleanName || path.basename(localPath), mimeType }
+    : url
+      ? { kind: 'url', url, name: cleanName || filenameFromUrl(url), mimeType }
+      : inlineData
+        ? { kind: 'inline', data: inlineData, name: cleanName || defaultNameForItem(item, fileValue), mimeType }
+        : null
+
+  if (!source) return
+  const key = source.kind === 'path' ? source.path : source.kind === 'url' ? source.url : source.data
+  if (seen.has(key)) return
+  seen.add(key)
+  sources.push(source)
+}
+
+function defaultNameForItem(item, value = '') {
+  const ext = path.extname(String(value)).toLowerCase()
+  if (ext) return `upload${ext}`
+  if (item.type === 'image') return 'image.png'
+  if (item.type === 'video') return 'video.mp4'
+  if (item.type === 'record' || item.type === 'audio') return 'audio.silk'
+  return 'upload'
+}
+
+export async function extractUploadSources(e) {
   const sources = []
   const seen = new Set()
   const items = [
     ...(Array.isArray(e?.message) ? e.message : []),
     ...(Array.isArray(e?.source?.message) ? e.source.message : []),
+    ...(Array.isArray(e?.img) ? e.img.map(url => ({ type: 'image', url })) : []),
+    ...(await getQuotedMessages(e)),
   ]
 
   for (const item of items) {
-    if (!item || typeof item !== 'object') continue
-    if (!['image', 'file', 'video'].includes(item.type)) continue
-
-    const name = item.name || item.filename || item.file_name || item.file || ''
-    const mimeType = item.mimeType || item.mime_type || item.contentType || ''
-    const candidates = [item.path, item.localPath, item.local_path, item.file]
-    const localPath = candidates.map(normalizeLocalPath).find(Boolean)
-    const url = normalizeUrl(item.url) || normalizeUrl(item.file)
-
-    const source = localPath
-      ? { kind: 'path', path: localPath, name: name && !/[\\/]/.test(name) ? name : path.basename(localPath), mimeType }
-      : url
-        ? { kind: 'url', url, name: name && !/[\\/]/.test(name) ? name : filenameFromUrl(url), mimeType }
-        : null
-
-    if (!source) continue
-    const key = source.kind === 'path' ? source.path : source.url
-    if (seen.has(key)) continue
-    seen.add(key)
-    sources.push(source)
+    pushItemSource(sources, seen, item)
   }
   return sources
 }
@@ -96,6 +154,16 @@ async function readSource(source) {
     }
   }
 
+  if (source.kind === 'inline') {
+    const filename = source.name || 'upload'
+    const parsed = parseInlineData(source.data)
+    return {
+      raw: parsed.raw,
+      filename,
+      mimeType: source.mimeType || parsed.mimeType || guessMimeType(filename),
+    }
+  }
+
   const fetch = await getFetch()
   const res = await fetch(source.url)
   if (!res.ok) throw new Error(`下载附件失败: ${res.status} ${await res.text().catch(() => '')}`)
@@ -106,6 +174,21 @@ async function readSource(source) {
     raw: Buffer.from(arrayBuffer),
     filename,
     mimeType: source.mimeType || headerMime || guessMimeType(filename),
+  }
+}
+
+function parseInlineData(data) {
+  if (data.startsWith('base64://')) {
+    return {
+      raw: Buffer.from(data.replace(/^base64:\/\//i, ''), 'base64'),
+      mimeType: '',
+    }
+  }
+  const match = data.match(/^data:([^;]+);base64,(.+)$/i)
+  if (!match) throw new Error('无法解析内联附件')
+  return {
+    raw: Buffer.from(match[2], 'base64'),
+    mimeType: match[1],
   }
 }
 

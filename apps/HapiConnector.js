@@ -592,7 +592,7 @@ export class HapiConnector extends plugin {
       return this.reply(lines.join('\n'))
     }
 
-    const sources = extractUploadSources(e)
+    const sources = await extractUploadSources(e)
     if (!sources.length) return this.reply('请在同一条消息里附带图片或文件：/hapi upload [附件]')
     const lines = []
     const attachments = []
@@ -654,7 +654,7 @@ export class HapiConnector extends plugin {
   }
 
   async uploadMessageAttachments(e, sid) {
-    const sources = extractUploadSources(e)
+    const sources = await extractUploadSources(e)
     if (!sources.length) return ['', []]
     const lines = []
     const attachments = []
