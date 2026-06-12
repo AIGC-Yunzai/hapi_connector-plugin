@@ -88,6 +88,12 @@ export function supportGuoba() {
           componentProps: { min: 30, step: 10 },
         },
         {
+          field: 'enable_poke_approve',
+          label: '开启戳一戳审核',
+          component: 'Switch',
+          bottomHelpMessage: '开启后，主人戳机器人会批准 HAPI 普通权限请求',
+        },
+        {
           field: 'auto_approve_enabled',
           label: '忙时托管审批',
           component: 'Switch',

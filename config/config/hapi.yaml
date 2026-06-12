@@ -27,6 +27,7 @@ quick_prefix: ">"
 # 待审批提醒与忙时托管审批
 remind_pending: true
 remind_interval: 180
+enable_poke_approve: true
 auto_approve_enabled: false
 auto_approve_start: "23:00"
 auto_approve_end: "07:00"

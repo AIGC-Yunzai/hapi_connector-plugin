@@ -1,4 +1,5 @@
 import plugin from '../../../lib/plugins/plugin.js'
+import Config from '../components/Config.js'
 import { getHapiRuntime } from './HapiConnector.js'
 import { isQuestionRequest } from '../utils/formatters.js'
 import * as ops from '../components/SessionOps.js'
@@ -24,6 +25,7 @@ export class hapiPokeApprove extends plugin {
   }
 
   async pokeApprove(e) {
+    if (!Config.getConfig().enable_poke_approve) return false
     const cfg = await this.getCfg()
     if (!this.isPokeToSelf(e, cfg) || !this.isMasterOperator(e, cfg)) return false
     const { client, sse } = getHapiRuntime()
