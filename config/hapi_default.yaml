@@ -1,0 +1,33 @@
+# HAPI Connector for Yunzai
+
+# HAPI 服务地址，例如 http://127.0.0.1:3006
+hapi_endpoint: ""
+
+# HAPI Access Token，支持 token:namespace 格式
+access_token: ""
+
+# Cloudflare Zero Trust Access Service Token，可留空
+cf_access_client_id: ""
+cf_access_client_secret: ""
+
+# JWT 缓存策略，需与 HAPI 后端保持一致或略短
+jwt_lifetime: 900
+refresh_before_expiry: 180
+
+# SSE 推送级别：silence / simple / summary / detail
+output_level: "simple"
+summary_msg_count: 5
+
+# 快捷发送前缀。默认 >消息 发到当前 session，>2 消息 发到第 2 个 session
+quick_prefix: ">"
+
+# 待审批提醒与忙时托管审批
+remind_pending: true
+remind_interval: 180
+auto_approve_enabled: false
+auto_approve_start: "23:00"
+auto_approve_end: "07:00"
+max_reconnect_attempts: 30
+
+# 是否随插件启动 SSE 监听
+enable_sse: true
