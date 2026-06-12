@@ -1,8 +1,12 @@
+![](https://socialify.git.ci/AIGC-Yunzai/hapi_connector-plugin/image?font=KoHo&forks=1&issues=1&language=1&name=1&owner=1&pattern=Circuit+Board&pulls=1&stargazers=1&theme=Auto)
+
 <div align="center">
 
 # HAPI Connector for TRSS-Yunzai
 
 _把 Claude Code / Codex / Gemini / OpenCode 会话搬进聊天窗口。_
+
+<img decoding="async" align=right src="resources/readme/girl.webp" width="35%">
 
 </div>
 
@@ -17,30 +21,52 @@ _把 Claude Code / Codex / Gemini / OpenCode 会话搬进聊天窗口。_
 - 多个项目、多种代理并行运行时按聊天窗口隔离通知
 - 从聊天窗口查看远端目录、搜索文件、下载/上传小文件
 
-## 安装与配置
+## 安装插件
 
 第一次使用请先看详细教程：[HAPI 安装与锅巴配置教程](docs/hapi-install-guoba.md)。
 
-将插件放到：
+#### 1. 克隆仓库
 
-```text
-TRSS-Yunzai/plugins/hapi_connector-plugin
+请在 TRSS-Yunzai 根目录执行：
+
+```bash
+git clone https://github.com/AIGC-Yunzai/hapi_connector-plugin.git ./plugins/hapi_connector-plugin
 ```
 
-首次启动会自动生成：
+> [!NOTE]
+> 如果你的网络环境较差，无法连接到 Github，可以使用 [GitHub Proxy](https://ghproxy.link/) 提供的文件代理加速下载服务：
+>
+> ```bash
+> git clone https://ghfast.top/https://github.com/AIGC-Yunzai/hapi_connector-plugin.git ./plugins/hapi_connector-plugin
+> ```
+>
+> 如果已经下载过本插件，需要修改代理加速下载服务地址，在插件根目录使用：
+>
+> ```bash
+> git remote set-url origin https://ghfast.top/https://github.com/AIGC-Yunzai/hapi_connector-plugin.git
+> ```
 
-```text
-plugins/hapi_connector-plugin/config/config/hapi.yaml
+#### 2. 安装依赖
+
+请在 TRSS-Yunzai 根目录执行：
+
+```bash
+pnpm install --filter=hapi_connector-plugin
 ```
 
-至少填写：
+## 插件配置
+
+> [!WARNING]
+> 非常不建议手动修改配置文件。本插件已兼容 [Guoba-plugin](https://github.com/guoba-yunzai/guoba-plugin)，请优先使用锅巴插件对配置项进行修改。
+
+锅巴里至少填写：
 
 ```yaml
 hapi_endpoint: "http://127.0.0.1:3006"
 access_token: "your-token"
 ```
 
-也可以在锅巴配置页修改。改完连接配置后建议重启云崽。
+改完连接配置后重启云崽，让 SSE 监听和运行时缓存完整生效。
 
 ## 指令前缀
 
@@ -155,63 +181,15 @@ silence / simple / summary / detail
 
 ## 插件维护
 
-参考云崽插件常见习惯，提供更新命令：
-
 ```text
 #hapi更新
-#hapi强制更新
-#hapi更新 main
-#hapi强制更新 dev
 ```
 
-更新完成后会自动重启云崽以生效。
+## TODO
 
-## 配置项
+- 云崽不同适配器对文件发送/接收能力有差异，文件上传与下载采用尽量通用的实现；如果某个适配器不支持发送文件，图片仍会优先以图片消息发送，普通文件会回退到 `segment.file`。
 
-| 配置项 | 说明 | 默认值 |
-| --- | --- | --- |
-| `hapi_endpoint` | HAPI 服务地址 | 空 |
-| `access_token` | HAPI Access Token，支持 `token:namespace` | 空 |
-| `proxy_url` | HTTP/HTTPS 代理地址 | 空 |
-| `cf_access_client_id` | Cloudflare Access Client ID | 空 |
-| `cf_access_client_secret` | Cloudflare Access Client Secret | 空 |
-| `jwt_lifetime` | JWT 有效期秒数 | `900` |
-| `refresh_before_expiry` | 提前刷新秒数 | `180` |
-| `output_level` | SSE 推送级别 | `simple` |
-| `summary_msg_count` | summary 推送消息条数 | `5` |
-| `quick_prefix` | 快捷发送前缀 | `>` |
-| `remind_pending` | 待审批提醒 | `true` |
-| `remind_interval` | 待审批提醒间隔 | `180` |
-| `auto_approve_enabled` | 忙时托管审批 | `false` |
-| `auto_approve_start` | 托管开始时间 | `23:00` |
-| `auto_approve_end` | 托管结束时间 | `07:00` |
-| `max_reconnect_attempts` | SSE 最大连续重连次数 | `30` |
-| `enable_sse` | 启动 SSE 监听 | `true` |
+## 致谢
 
-## 文件结构
+- 本插件参考了 AstrBot 版 [`astrbot_plugin_hapi_connector`](https://github.com/LiJinHao999/astrbot_plugin_hapi_connector) 的命令设计
 
-```text
-hapi_connector-plugin/
-├── apps/
-│   ├── HapiConnector.js
-│   ├── PokeApprove.js
-│   └── Update.js
-├── components/
-│   ├── Config.js
-│   ├── FileOps.js
-│   ├── HapiClient.js
-│   ├── SessionOps.js
-│   ├── SseListener.js
-│   └── State.js
-├── config/
-│   ├── hapi_default.yaml
-│   └── config/hapi.yaml
-├── model/path.js
-├── utils/formatters.js
-├── guoba.support.js
-└── index.js
-```
-
-## 说明
-
-本插件参考了 AstrBot 版 `astrbot_plugin_hapi_connector` 的命令设计，并按 TRSS-Yunzai 的插件规范重新实现。云崽不同适配器对文件发送/接收能力有差异，文件上传与下载采用尽量通用的实现；如果某个适配器不支持发送文件，图片仍会优先以图片消息发送，普通文件会回退到 `segment.file`。
