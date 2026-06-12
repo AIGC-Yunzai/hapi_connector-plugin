@@ -188,6 +188,8 @@ export function helpText(topic = '') {
     '#hapi to <序号> <内容>  发消息到指定 session',
     '> 内容                  快捷发到当前 session',
     '>2 内容                 快捷发到第 2 个 session',
+    '> 上传附件3张 [内容]      等待附件后发到当前 session',
+    '> 2 上传附件5份 [内容]    等待附件后发到第 2 个 session',
     '#hapi pending           查看待审批',
     '#hapi a                 批准全部普通请求',
     '#hapi deny [序号]       拒绝请求',

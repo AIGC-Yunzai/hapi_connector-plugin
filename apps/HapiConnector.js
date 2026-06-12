@@ -198,6 +198,9 @@ export class HapiConnector extends plugin {
 
     const rest = msg.slice(msg.startsWith(prefix) ? prefix.length : 1).trim()
     if (!rest) return false
+    const attachmentRequest = parseAttachmentRequest(rest)
+    if (attachmentRequest) return this.quickSendAttachments(e, attachmentRequest)
+
     const match = rest.match(/^(\d+)\s+([\s\S]+)$/)
     if (match) {
       await this.refreshSessions()
@@ -217,6 +220,74 @@ export class HapiConnector extends plugin {
     logger.info(`[hapi-connector] quickSend 触发: ${State.formatWindowKey(State.windowKey(e))} -> ${sid.slice(0, 8)}`)
     if (uploadText) await this.reply(uploadText)
     return this.reply(reply)
+  }
+
+  async quickSendAttachments(e, request) {
+    const session = await this.resolveQuickTarget(e, request.index)
+    if (!session) return true
+
+    const sources = await this.collectAttachmentSources(e, request.count)
+    if (!sources) return true
+
+    const [uploadText, attachments] = await this.uploadSources(session.id, sources)
+    if (uploadText) await this.reply(uploadText)
+    if (!attachments.length) return this.reply('没有成功上传的附件，已取消发送')
+
+    const text = request.text || `请查看这 ${attachments.length} 个附件。`
+    const [, reply] = await ops.sendMessage(this.client, session.id, text, attachments)
+    logger.info(`[hapi-connector] quickSend 附件触发: ${State.formatWindowKey(State.windowKey(e))} -> ${session.id.slice(0, 8)} (${attachments.length})`)
+    return this.reply(reply)
+  }
+
+  async resolveQuickTarget(e, index = '') {
+    if (index) {
+      await this.refreshSessions()
+      const session = sessionsCache[Number(index) - 1]
+      if (!session) {
+        await this.reply(`无效序号 ${index}，共 ${sessionsCache.length} 个 session`)
+        return null
+      }
+      return session
+    }
+    const sid = State.currentSid(e)
+    if (!sid) {
+      await this.reply('请先用 /hapi sw <序号> 选择一个 session')
+      return null
+    }
+    return { id: sid }
+  }
+
+  async collectAttachmentSources(e, count) {
+    const sources = []
+    const seen = new Set()
+    const addSources = async event => {
+      const before = sources.length
+      for (const source of await extractUploadSources(event)) {
+        const key = sourceKey(source)
+        if (seen.has(key)) continue
+        seen.add(key)
+        sources.push(source)
+        if (sources.length >= count) break
+      }
+      return sources.length - before
+    }
+
+    await addSources(e)
+    while (sources.length < count) {
+      await e.reply(`请发送附件，还需要 ${count - sources.length} 个；发送“取消”可退出`, true, { recallMsg: 119 })
+      const next = await this.awaitContext(e.isGroup, 120, '附件等待超时，已取消')
+      if (!next || isCancelText(next.msg)) {
+        await e.reply('附件发送已取消', true)
+        return null
+      }
+      if (!sameSender(e, next)) {
+        await e.reply('已忽略其他用户发送的消息，请继续发送附件', true, { recallMsg: 10 })
+        continue
+      }
+      const added = await addSources(next)
+      if (!added) await e.reply('这条消息里没有识别到图片、视频、文件或语音附件', true)
+    }
+    return sources.slice(0, count)
   }
 
   async cmdList(e, arg) {
@@ -656,6 +727,10 @@ export class HapiConnector extends plugin {
   async uploadMessageAttachments(e, sid) {
     const sources = await extractUploadSources(e)
     if (!sources.length) return ['', []]
+    return this.uploadSources(sid, sources)
+  }
+
+  async uploadSources(sid, sources) {
     const lines = []
     const attachments = []
     for (const source of sources) {
@@ -688,6 +763,32 @@ function splitLong(text, size = 3500) {
   const parts = []
   for (let i = 0; i < text.length; i += size) parts.push(text.slice(i, i + size))
   return parts
+}
+
+function parseAttachmentRequest(text) {
+  const match = String(text || '').match(/^(?:(\d+)\s+)?上传附件\s*(\d+)?\s*(?:张|份|个|件|条|段|则)?(?:\s+([\s\S]+))?$/)
+  if (!match) return null
+  const count = Math.min(Math.max(Number(match[2]) || 1, 1), 20)
+  return {
+    index: match[1] || '',
+    count,
+    text: (match[3] || '').trim(),
+  }
+}
+
+function isCancelText(text) {
+  return ['0', '取消', '退出', 'cancel', 'q'].includes(String(text || '').trim().toLowerCase())
+}
+
+function sourceKey(source) {
+  if (!source) return ''
+  if (source.kind === 'path') return `path:${source.path}`
+  if (source.kind === 'url') return `url:${source.url}`
+  return `inline:${source.data}`
+}
+
+function sameSender(a, b) {
+  return String(a?.user_id || a?.sender?.user_id || '') === String(b?.user_id || b?.sender?.user_id || '')
 }
 
 async function sendByWindowKey(key, text) {
