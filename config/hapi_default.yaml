@@ -3,7 +3,7 @@
 # HAPI 服务地址，例如 http://127.0.0.1:3006
 hapi_endpoint: ""
 
-# HAPI Access Token，支持 token:namespace 格式
+# HAPI Access Token，支持 token:namespace 格式；修改后重启生效
 access_token: ""
 
 # 代理地址，支持 http:// 与 https:// 代理；SOCKS 代理需额外依赖，当前会忽略

@@ -30,7 +30,7 @@ export function supportGuoba() {
           field: 'access_token',
           label: 'Access Token',
           component: 'InputPassword',
-          bottomHelpMessage: '支持 token:namespace 格式',
+          bottomHelpMessage: '支持 token:namespace 格式；修改后重启生效',
         },
         {
           field: 'proxy_url',

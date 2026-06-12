@@ -72,16 +72,18 @@ export class SseListener {
         this.connFailCount = 0
         this.connError = ''
         backoff = 1000
+        logger.mark(`[hapi-connector] SSE 连接成功: ${this.config?.hapi_endpoint || ''}`)
         await this.readStream(res)
       } catch (err) {
         if (!this.running || err.name === 'AbortError') return
         this.connFailCount += 1
         this.connError = `${err.name || 'Error'}: ${err.message || err}`
-        logger.warn(`[hapi-connector] SSE 断线: ${this.connError}`)
+        logger.mark(`[hapi-connector] SSE 连接失败(${this.connFailCount}): ${this.connError}`)
         const max = Number(this.config?.max_reconnect_attempts || 0)
         if (max > 0 && this.connFailCount >= max) {
           this.hibernated = true
           this.running = false
+          logger.mark(`[hapi-connector] SSE 连续失败 ${this.connFailCount} 次，已进入休眠`)
           await this.notify(`SSE 已连续失败 ${this.connFailCount} 次，已进入休眠。\n发送 /hapi list 可重新唤醒。`, '')
           return
         }

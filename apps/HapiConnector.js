@@ -43,12 +43,10 @@ export class HapiConnector extends plugin {
         {
           reg: /^(\/|#)hapi([\s\S]*)?$/i,
           fnc: 'hapi',
-          permission: 'master',
         },
         {
           reg: '^[>＞][\\s\\S]+$',
           fnc: 'quickSend',
-          permission: 'master',
           log: false,
         },
       ],
@@ -100,6 +98,7 @@ export class HapiConnector extends plugin {
   }
 
   async hapi(e) {
+    if (!e.isMaster) return false
     if (!(await this.ready(e))) return true
     const text = String(e.msg || '').replace(/^[/#]hapi/i, '').trim()
     const [cmdRaw = '', ...rest] = splitArgs(text)
@@ -191,6 +190,7 @@ export class HapiConnector extends plugin {
   }
 
   async quickSend(e) {
+    if (!e.isMaster) return false
     if (!(await this.ready(e))) return true
     const prefix = this.config.quick_prefix || '>'
     const msg = String(e.msg || '')
@@ -205,6 +205,7 @@ export class HapiConnector extends plugin {
       if (!session) return this.reply(`无效序号 ${match[1]}，共 ${sessionsCache.length} 个 session`)
       const [uploadText, attachments] = await this.uploadMessageAttachments(e, session.id)
       const [, reply] = await ops.sendMessage(this.client, session.id, match[2], attachments)
+      logger.info(`[hapi-connector] quickSend 触发: ${State.formatWindowKey(State.windowKey(e))} -> ${session.id.slice(0, 8)}`)
       if (uploadText) await this.reply(uploadText)
       return this.reply(reply)
     }
@@ -213,6 +214,7 @@ export class HapiConnector extends plugin {
     if (!sid) return this.reply('请先用 /hapi sw <序号> 选择一个 session')
     const [uploadText, attachments] = await this.uploadMessageAttachments(e, sid)
     const [, reply] = await ops.sendMessage(this.client, sid, rest, attachments)
+    logger.info(`[hapi-connector] quickSend 触发: ${State.formatWindowKey(State.windowKey(e))} -> ${sid.slice(0, 8)}`)
     if (uploadText) await this.reply(uploadText)
     return this.reply(reply)
   }
@@ -629,12 +631,26 @@ export class HapiConnector extends plugin {
     const session = sid ? sessionsCache.find(item => item.id === sid) : null
     const key = session ? State.windowForSession(session) : [...State.eventCache.keys()][0]
     if (!key) return
-    const event = State.eventCache.get(key)
+    const msg = splitLong(text)
+    const event = await buildEventFromWindowKey(key)
     if (event?.reply) {
-      await event.reply(splitLong(text))
-      return
+      try {
+        await event.reply(msg)
+        return
+      } catch (err) {
+        logger.debug(`[hapi-connector] 重建事件 reply 失败，尝试缓存事件: ${err.message || err}`)
+      }
     }
-    await sendByWindowKey(key, text)
+    const cachedEvent = State.eventCache.get(key)
+    if (cachedEvent?.reply) {
+      try {
+        await cachedEvent.reply(msg)
+        return
+      } catch (err) {
+        logger.debug(`[hapi-connector] 缓存事件 reply 失败，尝试直接发送: ${err.message || err}`)
+      }
+    }
+    await sendByWindowKey(key, msg)
   }
 
   async uploadMessageAttachments(e, sid) {
@@ -683,4 +699,35 @@ async function sendByWindowKey(key, text) {
   } catch (err) {
     logger.debug(`[hapi-connector] 主动推送失败: ${err.message || err}`)
   }
+}
+
+async function buildEventFromWindowKey(key) {
+  const [, self, type, id] = String(key).split(':')
+  if (!self || !type || !id) return null
+  const cached = State.eventCache.get(key) || {}
+  const isGroup = type === 'group'
+  const userId = String(cached.user_id || cached.sender?.user_id || (isGroup ? '' : id))
+  const event = {
+    self_id: self,
+    user_id: userId,
+    group_id: isGroup ? id : undefined,
+    post_type: 'message',
+    message_type: isGroup ? 'group' : 'private',
+    sub_type: 'normal',
+    isGroup,
+    isPrivate: !isGroup,
+    isMaster: cached.isMaster,
+    sender: cached.sender || { user_id: userId, nickname: 'hapi-connector' },
+    message: [],
+    msg: '',
+    raw_message: '',
+  }
+  try {
+    if (global.Bot && typeof Bot.prepareEvent === 'function') {
+      await Bot.prepareEvent(event)
+    }
+  } catch (err) {
+    logger.debug(`[hapi-connector] 构造推送事件失败: ${err.message || err}`)
+  }
+  return event
 }
