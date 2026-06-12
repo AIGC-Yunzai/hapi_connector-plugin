@@ -41,7 +41,7 @@ export class HapiConnector extends plugin {
       priority: 1008,
       rule: [
         {
-          reg: '^(/|#)hapi([\\s\\S]*)?$',
+          reg: /^(\/|#)hapi([\s\S]*)?$/i,
           fnc: 'hapi',
           permission: 'master',
         },

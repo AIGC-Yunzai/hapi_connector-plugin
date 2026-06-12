@@ -86,7 +86,7 @@ export function formatSessionList(sessions, currentSid = '', allSessions = null)
     lines.push(`[${idx} | ${session.id.slice(0, 8)}] ${title}`)
     lines.push(`${status} | ${meta.flavor || '?'}:${session.modelMode || 'default'}${pending}${current}`)
   }
-  lines.push('', '切换会话：/hapi sw <序号或ID前缀>')
+  lines.push('', '切换会话：#hapi sw <序号或ID前缀>')
   return lines.join('\n')
 }
 
@@ -142,11 +142,11 @@ export function formatPending(pending, sessions) {
   for (const [sid, rid, req] of items) {
     lines.push('', `[${req.index || 0}] ${sessionLabel(sid, sessions)}`)
     lines.push(`  ${formatRequestDetail(req)}`)
-    if (isQuestionRequest(req)) lines.push('  这是 question 请求，请用 /hapi answer <序号> <答案> 回答')
+    if (isQuestionRequest(req)) lines.push('  这是 question 请求，请用 #hapi answer <序号> <答案> 回答')
   }
-  lines.push('', '/hapi a 批准全部普通请求')
-  lines.push('/hapi allow <序号> 批准单个普通请求')
-  lines.push('/hapi deny [序号] 拒绝请求')
+  lines.push('', '#hapi a 批准全部普通请求')
+  lines.push('#hapi allow <序号> 批准单个普通请求')
+  lines.push('#hapi deny [序号] 拒绝请求')
   return lines.join('\n')
 }
 
@@ -181,43 +181,43 @@ export function helpText(topic = '') {
   const common = [
     'HAPI Connector 常用命令',
     '',
-    '/hapi list [all]        查看 session',
-    '/hapi sw <序号|ID前缀>  切换当前 session',
-    '/hapi s                 查看当前状态',
-    '/hapi msg [条数]        查看最近消息',
-    '/hapi to <序号> <内容>  发消息到指定 session',
+    '#hapi list [all]        查看 session',
+    '#hapi sw <序号|ID前缀>  切换当前 session',
+    '#hapi s                 查看当前状态',
+    '#hapi msg [条数]        查看最近消息',
+    '#hapi to <序号> <内容>  发消息到指定 session',
     '> 内容                  快捷发到当前 session',
     '>2 内容                 快捷发到第 2 个 session',
-    '/hapi pending           查看待审批',
-    '/hapi a                 批准全部普通请求',
-    '/hapi deny [序号]       拒绝请求',
-    '/hapi bind [flavor]     设置默认通知窗口',
+    '#hapi pending           查看待审批',
+    '#hapi a                 批准全部普通请求',
+    '#hapi deny [序号]       拒绝请求',
+    '#hapi bind [flavor]     设置默认通知窗口',
     '#hapi更新              更新插件',
     '#hapi强制更新          强制更新插件',
   ]
   if (!full) {
-    common.push('', '更多：/hapi help 全部')
+    common.push('', '更多：#hapi help 全部')
     return common.join('\n')
   }
   return [
     ...common,
-    '/hapi create <machineId> <目录> <agent> [simple|worktree] [yolo]',
-    '/hapi machines          查看在线机器',
-    '/hapi abort [目标]      中断 session',
-    '/hapi archive           归档当前 session',
-    '/hapi resume [目标]     恢复 inactive session',
-    '/hapi delete [目标]     删除 session',
-    '/hapi rename <标题>     重命名当前 session',
-    '/hapi clean [路径] confirm 清理 inactive sessions',
-    '/hapi files [路径]      浏览远端目录',
-    '/hapi find <关键词>     搜索远端文件',
-    '/hapi download <路径>   下载远端文件',
-    '/hapi upload [附件]     上传附件到当前 session',
-    '/hapi read <路径>       读取远端小文件',
-    '/hapi perm [模式]       查看/切换权限模式',
-    '/hapi model [模式]      查看/切换模型',
-    '/hapi effort [值]       查看/切换推理强度',
-    '/hapi output [级别]     查看/切换推送级别',
-    '/hapi routes            查看通知路由',
+    '#hapi create <machineId> <目录> <agent> [simple|worktree] [yolo]',
+    '#hapi machines          查看在线机器',
+    '#hapi abort [目标]      中断 session',
+    '#hapi archive           归档当前 session',
+    '#hapi resume [目标]     恢复 inactive session',
+    '#hapi delete [目标]     删除 session',
+    '#hapi rename <标题>     重命名当前 session',
+    '#hapi clean [路径] confirm 清理 inactive sessions',
+    '#hapi files [路径]      浏览远端目录',
+    '#hapi find <关键词>     搜索远端文件',
+    '#hapi download <路径>   下载远端文件',
+    '#hapi upload [附件]     上传附件到当前 session',
+    '#hapi read <路径>       读取远端小文件',
+    '#hapi perm [模式]       查看/切换权限模式',
+    '#hapi model [模式]      查看/切换模型',
+    '#hapi effort [值]       查看/切换推理强度',
+    '#hapi output [级别]     查看/切换推送级别',
+    '#hapi routes            查看通知路由',
   ].join('\n')
 }
