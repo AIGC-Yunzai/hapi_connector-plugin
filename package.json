@@ -1,6 +1,6 @@
 {
   "name": "hapi_connector-plugin",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Yunzai plugin for remote HAPI coding sessions",
   "main": "index.js",
   "type": "module",

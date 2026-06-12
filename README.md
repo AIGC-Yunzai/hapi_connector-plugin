@@ -19,6 +19,8 @@ _把 Claude Code / Codex / Gemini / OpenCode 会话搬进聊天窗口。_
 
 ## 安装与配置
 
+第一次使用请先看详细教程：[HAPI 安装与锅巴配置教程](docs/hapi-install-guoba.md)。
+
 将插件放到：
 
 ```text
