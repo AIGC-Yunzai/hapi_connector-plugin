@@ -21,6 +21,12 @@ _把 Claude Code / Codex / Gemini / OpenCode 会话搬进聊天窗口。_
 - 多个项目、多种代理并行运行时按聊天窗口隔离通知
 - 从聊天窗口查看远端目录、搜索文件、下载/上传小文件
 
+### 预览
+
+- 示例中连接的是 Claude Code
+<img width="350" alt="image" src="https://github.com/user-attachments/assets/f01e4ca9-176d-4812-8177-3d63623d13d7" />
+<img width="350" alt="image" src="https://github.com/user-attachments/assets/8dfaf13d-d1a4-40c9-9d2b-91abaa071f1c" />
+
 ## 安装插件
 
 第一次使用请先看详细教程：[HAPI 安装与锅巴配置教程](docs/hapi-install-guoba.md)。
@@ -179,7 +185,7 @@ SSE 推送级别：
 silence / simple / summary / detail
 ```
 
-## 插件维护
+插件维护：
 
 ```text
 #hapi更新
@@ -187,9 +193,19 @@ silence / simple / summary / detail
 
 ## TODO
 
-- 云崽不同适配器对文件发送/接收能力有差异，文件上传与下载采用尽量通用的实现；如果某个适配器不支持发送文件，图片仍会优先以图片消息发送，普通文件会回退到 `segment.file`。
+- [x] 云崽不同适配器对文件发送/接收能力有差异，文件上传与下载采用尽量通用的实现；如果某个适配器不支持发送文件，图片仍会优先以图片消息发送，普通文件会回退到 `segment.file`。
 
 ## 致谢
 
 - 本插件参考了 AstrBot 版 [`astrbot_plugin_hapi_connector`](https://github.com/LiJinHao999/astrbot_plugin_hapi_connector) 的命令设计
 
+
+---
+
+<div align="center">
+
+### 🎨 让AI自己打工！✨
+
+**[📚 查看插件主页](/) | [💬 加入交流群1](https://qm.qq.com/q/unjAw930RO) [💬 加入交流群2](https://qm.qq.com/q/tEqFnH0kTe) | [⭐ 给个Star](/)**
+
+</div>
