@@ -3,23 +3,29 @@ import { getHapiRuntime } from './HapiConnector.js'
 import { isQuestionRequest } from '../utils/formatters.js'
 import * as ops from '../components/SessionOps.js'
 
+// 如使用非 icqq 且 e.self_id 无法正确识别，可在此处填写机器人 QQ 号。
+const BotQQ = ''
+
 export class hapiPokeApprove extends plugin {
   constructor() {
     super({
       name: 'hapi-connector-戳一戳审批',
       dsc: '戳一戳机器人批准 HAPI 普通权限请求',
-      event: 'notice',
+      event: 'notice.*.poke',
       priority: 1008,
       rule: [
         {
+          reg: '.*',
           fnc: 'pokeApprove',
+          log: false,
         },
       ],
     })
   }
 
   async pokeApprove(e) {
-    if (!this.isPokeToSelf(e) || !e.isMaster) return false
+    const cfg = await this.getCfg()
+    if (!this.isPokeToSelf(e, cfg) || !this.isMasterOperator(e, cfg)) return false
     const { client, sse } = getHapiRuntime()
     const pending = sse?.getAllPending?.() || {}
     const items = []
@@ -48,11 +54,27 @@ export class hapiPokeApprove extends plugin {
     return true
   }
 
-  isPokeToSelf(e) {
-    const type = String(e.sub_type || e.notice_type || '').toLowerCase()
-    if (!type.includes('poke')) return false
-    const selfId = String(e.self_id || e.bot?.uin || '')
-    const targetId = String(e.target_id || e.user_id || '')
-    return Boolean(selfId && targetId && selfId === targetId)
+  isPokeToSelf(e, cfg) {
+    const targetId = String(e.target_id || '')
+    return this.botIds(e, cfg).includes(targetId)
+  }
+
+  isMasterOperator(e, cfg) {
+    const operatorId = String(e.operator_id || e.user_id || '')
+    return Boolean(operatorId && cfg.masterQQ?.map(String).includes(operatorId))
+  }
+
+  botIds(e, cfg) {
+    return [
+      e.self_id,
+      e.bot?.uin,
+      cfg.qq,
+      BotQQ,
+    ].filter(Boolean).map(String)
+  }
+
+  async getCfg() {
+    const mod = await import('../../../lib/config/config.js')
+    return mod.default
   }
 }
