@@ -1,4 +1,8 @@
-async function getFetch() {
+async function getFetch(proxyUrl = '') {
+  if (proxyUrl) {
+    const mod = await import('node-fetch')
+    return mod.default
+  }
   if (globalThis.fetch) return globalThis.fetch.bind(globalThis)
   const mod = await import('node-fetch')
   return mod.default
@@ -31,6 +35,7 @@ export class HapiClient {
     this.accessToken = String(config.access_token || '')
     this.jwtLifetime = Number(config.jwt_lifetime || 900)
     this.refreshBefore = Number(config.refresh_before_expiry || 180)
+    this.proxyUrl = String(config.proxy_url || '').trim()
     this.cfClientId = cleanCfValue(config.cf_access_client_id, 'cf-access-client-id:')
     this.cfClientSecret = cleanCfValue(config.cf_access_client_secret, 'cf-access-client-secret:')
   }
@@ -52,6 +57,16 @@ export class HapiClient {
     return Date.now() - this.obtainedAt >= (this.jwtLifetime - this.refreshBefore) * 1000
   }
 
+  async proxyOptions() {
+    if (!this.proxyUrl) return {}
+    if (!/^https?:\/\//i.test(this.proxyUrl)) {
+      logger.warn('[hapi-connector] 当前仅支持 HTTP/HTTPS proxy_url，已忽略 SOCKS 或未知代理')
+      return {}
+    }
+    const { HttpsProxyAgent } = await import('https-proxy-agent')
+    return { agent: new HttpsProxyAgent(this.proxyUrl) }
+  }
+
   async getToken(force = false) {
     if (!force && !this.shouldRefresh()) return this.jwt
     if (!this.authing) {
@@ -63,11 +78,13 @@ export class HapiClient {
   }
 
   async auth() {
-    const fetch = await getFetch()
+    const fetch = await getFetch(this.proxyUrl)
+    const proxyOptions = await this.proxyOptions()
     const res = await fetch(`${this.endpoint}/api/auth`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...this.cfHeaders() },
       body: JSON.stringify({ accessToken: this.accessToken }),
+      ...proxyOptions,
     })
     if (!res.ok) {
       const body = await res.text().catch(() => '')
@@ -81,7 +98,8 @@ export class HapiClient {
 
   async request(method, route, { json, params, auth = true, retry = true } = {}) {
     if (!this.endpoint) throw new Error('未配置 hapi_endpoint')
-    const fetch = await getFetch()
+    const fetch = await getFetch(this.proxyUrl)
+    const proxyOptions = await this.proxyOptions()
     const url = new URL(`${this.endpoint}${route}`)
     for (const [key, value] of Object.entries(params || {})) {
       if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value))
@@ -95,6 +113,7 @@ export class HapiClient {
       method,
       headers,
       body: json === undefined ? undefined : JSON.stringify(json),
+      ...proxyOptions,
     })
 
     if (res.status === 401 && auth && retry) {
@@ -103,6 +122,7 @@ export class HapiClient {
         method,
         headers,
         body: json === undefined ? undefined : JSON.stringify(json),
+        ...proxyOptions,
       })
     }
     return res
@@ -134,12 +154,13 @@ export class HapiClient {
   }
 
   async subscribeEvents({ signal } = {}) {
-    const fetch = await getFetch()
+    const fetch = await getFetch(this.proxyUrl)
+    const proxyOptions = await this.proxyOptions()
     const token = await this.getToken()
     const url = new URL(`${this.endpoint}/api/events`)
     url.searchParams.set('all', '1')
     url.searchParams.set('token', token)
-    const res = await fetch(url, { headers: this.cfHeaders(), signal })
+    const res = await fetch(url, { headers: this.cfHeaders(), signal, ...proxyOptions })
     if (!res.ok) throw new Error(`SSE 连接失败: ${res.status} ${await res.text().catch(() => '')}`)
     const ct = res.headers.get('content-type') || ''
     if (!ct.includes('text/event-stream')) {

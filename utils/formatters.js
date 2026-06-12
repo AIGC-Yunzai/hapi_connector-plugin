@@ -150,13 +150,13 @@ export function formatPending(pending, sessions) {
   return lines.join('\n')
 }
 
-export function formatDirectory(entries, currentPath = '.') {
+export function formatDirectory(entries, currentPath = '.', detail = true) {
   if (!entries.length) return `${currentPath}\n（空目录）`
   const dirs = entries.filter(item => item.type === 'directory').sort((a, b) => a.name.localeCompare(b.name))
   const files = entries.filter(item => item.type !== 'directory').sort((a, b) => a.name.localeCompare(b.name))
   const lines = [`${currentPath} (${dirs.length} 个文件夹, ${files.length} 个文件)`]
   for (const item of dirs) lines.push(`  [D] ${item.name}/`)
-  for (const item of files) lines.push(`  [F] ${item.name}${item.size ? ` (${formatSize(item.size)})` : ''}`)
+  for (const item of files) lines.push(`  [F] ${item.name}${detail && item.size ? ` (${formatSize(item.size)})` : ''}`)
   return lines.join('\n')
 }
 
@@ -192,6 +192,8 @@ export function helpText(topic = '') {
     '/hapi a                 批准全部普通请求',
     '/hapi deny [序号]       拒绝请求',
     '/hapi bind [flavor]     设置默认通知窗口',
+    '#hapi更新              更新插件',
+    '#hapi强制更新          强制更新插件',
   ]
   if (!full) {
     common.push('', '更多：/hapi help 全部')
@@ -205,8 +207,12 @@ export function helpText(topic = '') {
     '/hapi archive           归档当前 session',
     '/hapi resume [目标]     恢复 inactive session',
     '/hapi delete [目标]     删除 session',
+    '/hapi rename <标题>     重命名当前 session',
+    '/hapi clean [路径] confirm 清理 inactive sessions',
     '/hapi files [路径]      浏览远端目录',
     '/hapi find <关键词>     搜索远端文件',
+    '/hapi download <路径>   下载远端文件',
+    '/hapi upload [附件]     上传附件到当前 session',
     '/hapi read <路径>       读取远端小文件',
     '/hapi perm [模式]       查看/切换权限模式',
     '/hapi model [模式]      查看/切换模型',

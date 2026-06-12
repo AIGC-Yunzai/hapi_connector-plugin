@@ -5,6 +5,13 @@ import { HapiClient } from '../components/HapiClient.js'
 import { SseListener } from '../components/SseListener.js'
 import * as ops from '../components/SessionOps.js'
 import {
+  deleteUploadedFile,
+  downloadToTmp,
+  extractUploadSources,
+  getRemoteFileSize,
+  uploadFile,
+} from '../components/FileOps.js'
+import {
   CLAUDE_EFFORTS,
   CODEX_EFFORTS,
   GEMINI_MODEL_MODES,
@@ -34,7 +41,7 @@ export class HapiConnector extends plugin {
       priority: 1008,
       rule: [
         {
-          reg: '^(/|#)hapi(\\s+[\\s\\S]*)?$',
+          reg: '^(/|#)hapi([\\s\\S]*)?$',
           fnc: 'hapi',
           permission: 'master',
         },
@@ -76,6 +83,10 @@ export class HapiConnector extends plugin {
     this.config = Config.getConfig()
     this.client.configure(this.config)
     if (sharedSse) sharedSse.config = this.config
+    if (this.client.isConfigured() && this.config.enable_sse && !sharedSse) {
+      sharedSse = new SseListener(this.client, sessionsCache, this.pushNotification.bind(this))
+      sharedSse.start(this.config)
+    }
     if (!this.client.isConfigured()) {
       await this.reply('请先配置 hapi_connector-plugin/config/config/hapi.yaml 中的 hapi_endpoint 和 access_token')
       return false
@@ -135,8 +146,12 @@ export class HapiConnector extends plugin {
           return this.cmdSessionAction(e, arg, ops.archiveSession)
         case 'resume':
           return this.cmdResume(e, arg)
+        case 'rename':
+          return this.cmdRename(e, arg)
         case 'delete':
           return this.cmdDelete(e, arg)
+        case 'clean':
+          return this.cmdClean(e, arg)
         case 'remote':
           return this.cmdSessionAction(e, arg, ops.switchToRemote)
         case 'perm':
@@ -159,6 +174,11 @@ export class HapiConnector extends plugin {
           return this.cmdFiles(e, arg || '.')
         case 'find':
           return this.cmdFind(e, arg)
+        case 'download':
+        case 'dl':
+          return this.cmdDownload(e, arg)
+        case 'upload':
+          return this.cmdUpload(e, arg)
         case 'read':
           return this.cmdRead(e, arg)
         default:
@@ -183,13 +203,17 @@ export class HapiConnector extends plugin {
       await this.refreshSessions()
       const session = sessionsCache[Number(match[1]) - 1]
       if (!session) return this.reply(`无效序号 ${match[1]}，共 ${sessionsCache.length} 个 session`)
-      const [, reply] = await ops.sendMessage(this.client, session.id, match[2])
+      const [uploadText, attachments] = await this.uploadMessageAttachments(e, session.id)
+      const [, reply] = await ops.sendMessage(this.client, session.id, match[2], attachments)
+      if (uploadText) await this.reply(uploadText)
       return this.reply(reply)
     }
 
     const sid = State.currentSid(e)
     if (!sid) return this.reply('请先用 /hapi sw <序号> 选择一个 session')
-    const [, reply] = await ops.sendMessage(this.client, sid, rest)
+    const [uploadText, attachments] = await this.uploadMessageAttachments(e, sid)
+    const [, reply] = await ops.sendMessage(this.client, sid, rest, attachments)
+    if (uploadText) await this.reply(uploadText)
     return this.reply(reply)
   }
 
@@ -233,7 +257,9 @@ export class HapiConnector extends plugin {
     await this.refreshSessions()
     const session = this.resolveSession(parts[0])
     if (!session) return this.reply(`未找到 session：${parts[0]}`)
-    const [, msg] = await ops.sendMessage(this.client, session.id, arg.slice(parts[0].length).trim())
+    const [uploadText, attachments] = await this.uploadMessageAttachments(e, session.id)
+    const [, msg] = await ops.sendMessage(this.client, session.id, arg.slice(parts[0].length).trim(), attachments)
+    if (uploadText) await this.reply(uploadText)
     return this.reply(msg)
   }
 
@@ -347,6 +373,50 @@ export class HapiConnector extends plugin {
     return this.reply(msg)
   }
 
+  async cmdRename(e, arg) {
+    const sid = State.currentSid(e)
+    if (!sid) return this.reply('请先选择 session')
+    const name = arg.trim()
+    if (!name) return this.reply('用法：/hapi rename <新标题>')
+    const [, msg] = await ops.renameSession(this.client, sid, name)
+    await this.refreshSessions()
+    return this.reply(msg)
+  }
+
+  async cmdClean(e, arg) {
+    await this.refreshSessions()
+    const parts = splitArgs(arg)
+    const confirm = parts.some(item => ['confirm', 'yes', '确认'].includes(item.toLowerCase()))
+    const pathFilter = parts.filter(item => !['confirm', 'yes', '确认'].includes(item.toLowerCase())).join(' ')
+    const targets = sessionsCache.filter(session => {
+      if (session.active) return false
+      if (!pathFilter) return true
+      return String(session.metadata?.path || '').startsWith(pathFilter)
+    })
+    if (!targets.length) return this.reply('没有符合条件的 inactive session')
+    if (!confirm) {
+      return this.reply([
+        `将清理 ${targets.length} 个 inactive session:`,
+        formatSessionList(targets, '', sessionsCache),
+        '',
+        `确认执行请发送：/hapi clean${pathFilter ? ` ${pathFilter}` : ''} confirm`,
+      ].join('\n'))
+    }
+
+    let okCount = 0
+    const lines = []
+    for (const session of targets) {
+      const [ok, msg] = await ops.deleteSession(this.client, session.id)
+      if (ok) {
+        okCount += 1
+        State.clearSession(session.id)
+      }
+      lines.push(msg)
+    }
+    await this.refreshSessions()
+    return this.reply(`清理完成: ${okCount}/${targets.length}\n${lines.join('\n')}`)
+  }
+
   async cmdPerm(e, arg) {
     const sid = State.currentSid(e)
     if (!sid) return this.reply('请先选择 session')
@@ -446,8 +516,11 @@ export class HapiConnector extends plugin {
   async cmdFiles(e, arg) {
     const sid = State.currentSid(e)
     if (!sid) return this.reply('请先选择 session')
-    const entries = await ops.listDirectory(this.client, sid, arg || '.')
-    return this.reply(formatDirectory(entries, arg || '.'))
+    const parts = splitArgs(arg)
+    const detail = parts.includes('-l')
+    const targetPath = parts.filter(item => item !== '-l').join(' ') || '.'
+    const entries = await ops.listDirectory(this.client, sid, targetPath)
+    return this.reply(formatDirectory(entries, targetPath, detail))
   }
 
   async cmdFind(e, arg) {
@@ -466,6 +539,67 @@ export class HapiConnector extends plugin {
     if (!ok) return this.reply(content)
     const decoded = Buffer.from(content, 'base64').toString('utf8')
     return this.reply(splitLong(decoded || '(空文件)'))
+  }
+
+  async cmdDownload(e, arg) {
+    const sid = State.currentSid(e)
+    if (!sid) return this.reply('请先选择 session')
+    const remotePath = arg.trim()
+    if (!remotePath) return this.reply('用法：/hapi download <远端文件路径>')
+    const size = await getRemoteFileSize(this.client, sid, remotePath)
+    if (size > 10 * 1024 * 1024) return this.reply(`文件过大 (${(size / 1024 / 1024).toFixed(1)} MB)，超过 10 MB 限制`)
+
+    let file
+    try {
+      file = await downloadToTmp(this.client, sid, remotePath)
+      if (file.isImage) {
+        await e.reply(segment.image(file.tmpPath))
+      } else if (e.group?.sendFile) {
+        await e.group.sendFile(file.tmpPath, file.filename)
+      } else if (e.friend?.sendFile) {
+        await e.friend.sendFile(file.tmpPath, file.filename)
+      } else if (e.bot?.sendFile) {
+        await e.bot.sendFile(file.tmpPath, file.filename)
+      } else {
+        await e.reply(segment.file(file.tmpPath, file.filename))
+      }
+      return true
+    } catch (err) {
+      return this.reply(`下载失败：${err.message || err}`)
+    } finally {
+      if (file?.tmpPath) {
+        const fs = await import('node:fs')
+        fs.rmSync(file.tmpPath, { force: true })
+      }
+    }
+  }
+
+  async cmdUpload(e, arg) {
+    const sid = State.currentSid(e)
+    if (!sid) return this.reply('请先选择 session')
+    const action = arg.trim().toLowerCase()
+    if (action === 'cancel') {
+      const entries = await ops.listDirectory(this.client, sid, '/blobs')
+      const files = entries.filter(item => item.type === 'file')
+      if (!files.length) return this.reply('当前 session 没有已上传的文件')
+      const lines = []
+      for (const file of files) {
+        const [, msg] = await deleteUploadedFile(this.client, sid, `/blobs/${file.name}`)
+        lines.push(msg)
+      }
+      return this.reply(lines.join('\n'))
+    }
+
+    const sources = extractUploadSources(e)
+    if (!sources.length) return this.reply('请在同一条消息里附带图片或文件：/hapi upload [附件]')
+    const lines = []
+    const attachments = []
+    for (const source of sources) {
+      const [ok, msg, attachment] = await uploadFile(this.client, sid, source)
+      lines.push(msg)
+      if (ok && attachment) attachments.push(attachment)
+    }
+    return this.reply(`${lines.join('\n')}\n\n已上传 ${attachments.length}/${sources.length} 个附件到 [${sid.slice(0, 8)}]`)
   }
 
   resolveSession(target) {
@@ -501,6 +635,27 @@ export class HapiConnector extends plugin {
       return
     }
     await sendByWindowKey(key, text)
+  }
+
+  async uploadMessageAttachments(e, sid) {
+    const sources = extractUploadSources(e)
+    if (!sources.length) return ['', []]
+    const lines = []
+    const attachments = []
+    for (const source of sources) {
+      const [ok, msg, attachment] = await uploadFile(this.client, sid, source)
+      lines.push(msg)
+      if (ok && attachment) attachments.push(attachment)
+    }
+    return [lines.join('\n'), attachments]
+  }
+}
+
+export function getHapiRuntime() {
+  return {
+    client: sharedClient,
+    sse: sharedSse,
+    sessions: sessionsCache,
   }
 }
 

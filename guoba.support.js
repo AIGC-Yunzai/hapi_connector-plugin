@@ -33,6 +33,12 @@ export function supportGuoba() {
           bottomHelpMessage: '支持 token:namespace 格式',
         },
         {
+          field: 'proxy_url',
+          label: '代理地址',
+          component: 'Input',
+          bottomHelpMessage: '可选，支持 http:// 与 https:// 代理',
+        },
+        {
           field: 'cf_access_client_id',
           label: 'CF Access Client ID',
           component: 'InputPassword',

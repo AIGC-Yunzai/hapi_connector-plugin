@@ -6,6 +6,9 @@ hapi_endpoint: ""
 # HAPI Access Token，支持 token:namespace 格式
 access_token: ""
 
+# 代理地址，支持 http:// 与 https:// 代理；SOCKS 代理需额外依赖，当前会忽略
+proxy_url: ""
+
 # Cloudflare Zero Trust Access Service Token，可留空
 cf_access_client_id: ""
 cf_access_client_secret: ""

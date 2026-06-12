@@ -96,6 +96,12 @@ export async function deleteSession(client, sid) {
   return [false, `删除失败: ${res.status} ${(await res.text()).slice(0, 200)}`]
 }
 
+export async function renameSession(client, sid, name) {
+  const res = await client.patch(`/api/sessions/${sid}`, { json: { name } })
+  if (res.ok) return [true, `重命名成功 [${sid.slice(0, 8)}]`]
+  return [false, `重命名失败: ${res.status} ${(await res.text()).slice(0, 200)}`]
+}
+
 export async function fetchMachines(client) {
   const data = await client.requestJson('GET', '/api/machines')
   return (data.machines || []).filter(machine => machine.active)
