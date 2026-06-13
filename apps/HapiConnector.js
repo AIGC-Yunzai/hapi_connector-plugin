@@ -560,17 +560,17 @@ export class HapiConnector extends plugin {
 
       const prompt = listError
         ? [
-            `无法从 HAPI runner 获取目录列表：${listError}`,
-            '请直接输入远端工作目录，例如：/root/TRSS-Yunzai 或 E:/myrepo/project',
-          ].join('\n')
+          `无法从 HAPI runner 获取目录列表：${listError}`,
+          '请直接输入远端工作目录，例如：/root/TRSS-Yunzai 或 E:/myrepo/project',
+        ].join('\n')
         : [
-            `请选择远端工作目录，当前浏览：${current}`,
-            dirs.length ? dirs.map((item, idx) => `${idx + 1}. ${directoryEntryName(item)}`).join('\n') : '(当前目录下没有可显示的子目录)',
-            '',
-            roots.length > 1
-              ? '发送“.”选择当前目录，发送序号选择子目录，发送“cd 序号”进入子目录，发送“..”返回上级，发送“roots”返回根目录列表；也可以直接输入完整路径。'
-              : '发送“.”选择当前目录，发送序号选择子目录，发送“cd 序号”进入子目录，发送“..”返回上级；也可以直接输入完整路径。',
-          ].join('\n')
+          `请选择远端工作目录，当前浏览：${current}`,
+          dirs.length ? dirs.map((item, idx) => `${idx + 1}. ${directoryEntryName(item)}`).join('\n') : '(当前目录下没有可显示的子目录)',
+          '',
+          roots.length > 1
+            ? '发送“.”选择当前目录，发送序号选择子目录，发送“cd 序号”进入子目录，发送“..”返回上级，发送“roots”返回根目录列表；也可以直接输入完整路径。'
+            : '发送“.”选择当前目录，发送序号选择子目录，发送“cd 序号”进入子目录，发送“..”返回上级；也可以直接输入完整路径。',
+        ].join('\n')
 
       const input = await this.awaitSettingArg(e, prompt)
       if (!input) return ''
@@ -1052,7 +1052,18 @@ function isGroupMessage(e) {
 
 function isAtSelf(e) {
   const selfId = String(e?.self_id || e?.bot?.uin || '')
-  return Boolean(selfId && String(e?.at || '') === selfId)
+  if (!selfId) return false
+  const atTargets = []
+  if (Array.isArray(e?.at)) atTargets.push(...e.at)
+  else if (e?.at !== undefined && e?.at !== null) atTargets.push(e.at)
+  if (Array.isArray(e?.message)) {
+    for (const item of e.message) {
+      if (item?.type !== 'at') continue
+      const target = item.qq ?? item.data?.qq ?? item.user_id ?? item.id
+      if (target !== undefined && target !== null) atTargets.push(target)
+    }
+  }
+  return atTargets.some(target => String(target) === selfId)
 }
 
 function isSkipText(text) {
