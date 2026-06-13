@@ -288,14 +288,10 @@ export class HapiConnector extends plugin {
     await addSources(e)
     while (sources.length < count) {
       await e.reply(`请发送附件，还需要 ${count - sources.length} 个；发送“取消”可退出`, true, { recallMsg: 119 })
-      const next = await this.awaitContext(e.isGroup, 120, '附件等待超时，已取消')
+      const next = await this.awaitContext()
       if (!next || isCancelText(next.msg)) {
         await e.reply('附件发送已取消', true)
         return null
-      }
-      if (!sameSender(e, next)) {
-        await e.reply('已忽略其他用户发送的消息，请继续发送附件', true, { recallMsg: 10 })
-        continue
       }
       const added = await addSources(next)
       if (!added) await e.reply('这条消息里没有识别到图片、视频、文件或语音附件', true)
@@ -428,7 +424,7 @@ export class HapiConnector extends plugin {
       machine = resolveMachineChoice(machineInput, machines)
     }
 
-    const directory = parts[1] || await this.awaitSettingArg(e, '请输入远端工作目录，例如：/root/TRSS-Yunzai 或 E:/myrepo/project')
+    const directory = parts[1] || await this.selectMachineDirectory(e, machine)
     if (!directory) return true
 
     const agents = ['claude', 'codex', 'gemini', 'opencode']
@@ -488,6 +484,55 @@ export class HapiConnector extends plugin {
       await this.applyCreateOptions(sid, agent, createOptions)
     }
     return this.reply(msg)
+  }
+
+  async selectMachineDirectory(e, machine) {
+    const machineId = machineIdOf(machine)
+    let current = machineDefaultPath(machine)
+
+    while (true) {
+      let dirs = []
+      let listError = ''
+      try {
+        const entries = await ops.listMachineDirectory(this.client, machineId, current)
+        dirs = entries.filter(isDirectoryEntry).slice(0, 30)
+      } catch (err) {
+        listError = err.message || String(err)
+      }
+
+      const prompt = listError
+        ? [
+            `无法从 HAPI runner 获取目录列表：${listError}`,
+            '请直接输入远端工作目录，例如：/root/TRSS-Yunzai 或 E:/myrepo/project',
+          ].join('\n')
+        : [
+            `请选择远端工作目录，当前浏览：${current}`,
+            dirs.length ? dirs.map((item, idx) => `${idx + 1}. ${directoryEntryName(item)}`).join('\n') : '(当前目录下没有可显示的子目录)',
+            '',
+            '发送序号选择目录，发送“cd 序号”进入子目录，发送“..”返回上级；也可以直接输入完整路径。',
+          ].join('\n')
+
+      const input = await this.awaitSettingArg(e, prompt)
+      if (!input) return ''
+      const text = input.trim()
+      const lower = text.toLowerCase()
+      if (lower === '..') {
+        current = parentPath(current)
+        continue
+      }
+      const cdMatch = text.match(/^cd\s+(\d+)$/i)
+      if (cdMatch) {
+        const dir = dirs[Number(cdMatch[1]) - 1]
+        if (!dir) {
+          await this.reply(`无效目录序号：${cdMatch[1]}`)
+          continue
+        }
+        current = directoryEntryPath(dir, current)
+        continue
+      }
+      if (/^\d+$/.test(text) && dirs[Number(text) - 1]) return directoryEntryPath(dirs[Number(text) - 1], current)
+      return text
+    }
   }
 
   async awaitChoiceArg(e, prompt, values, initial = '', fallback = null) {
@@ -651,20 +696,14 @@ export class HapiConnector extends plugin {
 
   async awaitSettingArg(e, prompt) {
     await this.reply(prompt)
-    while (true) {
-      const next = await this.awaitContext(e.isGroup, 120, '等待输入超时，已取消')
-      if (!next) return ''
-      if (!sameSender(e, next)) {
-        await this.reply('已忽略其他用户发送的消息，请继续发送设置值', true, { recallMsg: 10 })
-        continue
-      }
-      const text = String(next.msg || '').trim()
-      if (isCancelText(text)) {
-        await this.reply('已取消设置', true)
-        return ''
-      }
-      return text
+    const next = await this.awaitContext()
+    if (!next) return ''
+    const text = String(next.msg || '').trim()
+    if (isCancelText(text)) {
+      await this.reply('操作已取消', true)
+      return ''
     }
+    return text
   }
 
   async cmdPlan(e) {
@@ -880,6 +919,7 @@ export class HapiConnector extends plugin {
     }
     return [lines.join('\n'), attachments]
   }
+
 }
 
 export function getHapiRuntime() {
@@ -949,6 +989,55 @@ function machineIdOf(machine) {
   return String(machine?.id || machine?.machineId || machine?.name || '')
 }
 
+function machineDefaultPath(machine) {
+  const meta = machine?.metadata || machine?.data || machine || {}
+  const candidates = [
+    meta.workspaceRoot,
+    meta.workspace_root,
+    meta.workspace,
+    meta.cwd,
+    meta.currentDirectory,
+    meta.homeDir,
+    meta.home,
+  ].filter(Boolean)
+  if (Array.isArray(meta.workspaceRoots) && meta.workspaceRoots[0]) candidates.unshift(meta.workspaceRoots[0])
+  if (Array.isArray(meta.workspace_roots) && meta.workspace_roots[0]) candidates.unshift(meta.workspace_roots[0])
+  if (candidates[0]) return String(candidates[0])
+  const platform = String(meta.platform || meta.os || '').toLowerCase()
+  return platform.includes('win') ? 'C:/' : '/'
+}
+
+function isDirectoryEntry(entry) {
+  const type = String(entry?.type || entry?.kind || '').toLowerCase()
+  return type === 'directory' || type === 'dir' || entry?.isDirectory === true || entry?.directory === true
+}
+
+function directoryEntryName(entry) {
+  return String(entry?.name || entry?.basename || entry?.path || entry?.fullPath || '')
+}
+
+function directoryEntryPath(entry, current) {
+  const direct = String(entry?.fullPath || entry?.path || '')
+  if (direct) return direct
+  return joinRemotePath(current, directoryEntryName(entry))
+}
+
+function joinRemotePath(base, name) {
+  const root = String(base || '/')
+  const child = String(name || '').replace(/^[/\\]+/, '')
+  if (/^[a-z]:\/?$/i.test(root)) return `${root.replace(/\/?$/, '/')}${child}`
+  if (root === '/') return `/${child}`
+  return `${root.replace(/[/\\]+$/, '')}/${child}`
+}
+
+function parentPath(path) {
+  const value = String(path || '/').replace(/[/\\]+$/, '')
+  if (!value || value === '/' || /^[a-z]:$/i.test(value)) return value ? `${value}/` : '/'
+  const idx = Math.max(value.lastIndexOf('/'), value.lastIndexOf('\\'))
+  if (idx <= 0) return value.includes(':') ? `${value.slice(0, 2)}/` : '/'
+  return value.slice(0, idx)
+}
+
 function normalizeModelInput(input) {
   const value = String(input || '').trim()
   const match = value.match(/^(opus|sonnet|fable)(?:\[?1m\]?|-?1m)$/i)
@@ -1003,10 +1092,6 @@ function sourceKey(source) {
   if (source.kind === 'path') return `path:${source.path}`
   if (source.kind === 'url') return `url:${source.url}`
   return `inline:${source.data}`
-}
-
-function sameSender(a, b) {
-  return String(a?.user_id || a?.sender?.user_id || '') === String(b?.user_id || b?.sender?.user_id || '')
 }
 
 async function sendByWindowKey(key, text) {

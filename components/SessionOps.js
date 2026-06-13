@@ -114,6 +114,12 @@ export async function spawnSession(client, machineId, payload) {
   return [false, `创建失败: ${res.status} ${body.message || body.error || ''}`, null]
 }
 
+export async function listMachineDirectory(client, machineId, path) {
+  const data = await client.requestJson('POST', `/api/machines/${machineId}/list-directory`, { json: { path } })
+  if (Array.isArray(data)) return data
+  return data.entries || data.items || data.directories || data.files || []
+}
+
 export async function listDirectory(client, sid, path = '.') {
   const data = await client.requestJson('GET', `/api/sessions/${sid}/directory`, { params: { path } })
   return data.entries || []
