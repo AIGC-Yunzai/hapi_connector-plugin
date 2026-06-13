@@ -35,6 +35,8 @@ let sharedClient = null
 let sharedSse = null
 let booting = null
 
+const UPLOAD_CONCURRENCY = 3
+
 const HAPI_RUNNER_HINT = [
   '没有在线 machine。',
   '请参考 README 安装教程，先在运行 HAPI 的控制台启动 Hapi runner，例如：',
@@ -631,7 +633,8 @@ export class HapiConnector extends plugin {
     await this.refreshSessions()
     const sid = this.resolveSession(arg)?.id || State.currentSid(e)
     if (!sid) return this.reply('请先选择 session，或提供序号/ID前缀')
-    const [, msg] = await action(this.client, sid)
+    const [ok, msg] = await action(this.client, sid)
+    if (ok) await this.refreshSessions()
     return this.reply(msg)
   }
 
@@ -906,14 +909,8 @@ export class HapiConnector extends plugin {
 
     const sources = await extractUploadSources(e)
     if (!sources.length) return this.reply('请在同一条消息里附带图片或文件：#hapi upload [附件]')
-    const lines = []
-    const attachments = []
-    for (const source of sources) {
-      const [ok, msg, attachment] = await uploadFile(this.client, sid, source)
-      lines.push(msg)
-      if (ok && attachment) attachments.push(attachment)
-    }
-    return this.reply(`${lines.join('\n')}\n\n已上传 ${attachments.length}/${sources.length} 个附件到 [${sid.slice(0, 8)}]`)
+    const [uploadText, attachments] = await this.uploadSources(sid, sources)
+    return this.reply(`${uploadText}\n\n已上传 ${attachments.length}/${sources.length} 个附件到 [${sid.slice(0, 8)}]`)
   }
 
   resolveSession(target) {
@@ -972,10 +969,10 @@ export class HapiConnector extends plugin {
   }
 
   async uploadSources(sid, sources) {
+    const results = await mapLimit(sources, UPLOAD_CONCURRENCY, source => uploadFile(this.client, sid, source))
     const lines = []
     const attachments = []
-    for (const source of sources) {
-      const [ok, msg, attachment] = await uploadFile(this.client, sid, source)
+    for (const [ok, msg, attachment] of results) {
       lines.push(msg)
       if (ok && attachment) attachments.push(attachment)
     }
@@ -1248,6 +1245,21 @@ function sourceKey(source) {
   if (source.kind === 'path') return `path:${source.path}`
   if (source.kind === 'url') return `url:${source.url}`
   return `inline:${source.data}`
+}
+
+async function mapLimit(items, limit, mapper) {
+  const results = new Array(items.length)
+  let nextIndex = 0
+  const workerCount = Math.min(Math.max(Number(limit) || 1, 1), items.length)
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex
+      nextIndex += 1
+      results[index] = await mapper(items[index], index)
+    }
+  })
+  await Promise.all(workers)
+  return results
 }
 
 async function sendByWindowKey(key, text) {

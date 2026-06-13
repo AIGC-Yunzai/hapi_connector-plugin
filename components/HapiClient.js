@@ -24,6 +24,8 @@ export class HapiContentTypeError extends Error {
 
 export class HapiClient {
   constructor(config) {
+    this.proxyAgent = null
+    this.proxyAgentUrl = ''
     this.configure(config)
     this.jwt = ''
     this.obtainedAt = 0
@@ -35,7 +37,12 @@ export class HapiClient {
     this.accessToken = String(config.access_token || '')
     this.jwtLifetime = Number(config.jwt_lifetime || 900)
     this.refreshBefore = Number(config.refresh_before_expiry || 180)
-    this.proxyUrl = String(config.proxy_url || '').trim()
+    const proxyUrl = String(config.proxy_url || '').trim()
+    if (this.proxyUrl !== proxyUrl) {
+      this.proxyAgent = null
+      this.proxyAgentUrl = ''
+    }
+    this.proxyUrl = proxyUrl
     this.cfClientId = cleanCfValue(config.cf_access_client_id, 'cf-access-client-id:')
     this.cfClientSecret = cleanCfValue(config.cf_access_client_secret, 'cf-access-client-secret:')
   }
@@ -63,8 +70,11 @@ export class HapiClient {
       logger.warn('[hapi-connector] 当前仅支持 HTTP/HTTPS proxy_url，已忽略 SOCKS 或未知代理')
       return {}
     }
+    if (this.proxyAgent && this.proxyAgentUrl === this.proxyUrl) return { agent: this.proxyAgent }
     const { HttpsProxyAgent } = await import('https-proxy-agent')
-    return { agent: new HttpsProxyAgent(this.proxyUrl) }
+    this.proxyAgent = new HttpsProxyAgent(this.proxyUrl)
+    this.proxyAgentUrl = this.proxyUrl
+    return { agent: this.proxyAgent }
   }
 
   async getToken(force = false) {

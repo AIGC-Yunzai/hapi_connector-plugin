@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp'])
 const MEDIA_TYPES = new Set(['image', 'video', 'file', 'record', 'audio'])
 const quotedContextCache = new WeakMap()
+const MAX_UPLOAD_FILENAME_LENGTH = 180
 
 async function getFetch() {
   if (globalThis.fetch) return globalThis.fetch.bind(globalThis)
@@ -212,6 +213,16 @@ function defaultNameForItem(item, value = '') {
   return 'upload'
 }
 
+function uniqueUploadFilename(filename) {
+  const safeName = String(filename || 'upload')
+  const parsed = path.parse(safeName)
+  const ext = parsed.ext || ''
+  const suffix = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
+  const maxStemLength = Math.max(MAX_UPLOAD_FILENAME_LENGTH - suffix.length - ext.length - 1, 16)
+  const stem = (parsed.name || 'upload').slice(0, maxStemLength)
+  return `${stem}-${suffix}${ext}`
+}
+
 export async function extractUploadSources(e) {
   const sources = []
   const seen = new Set()
@@ -287,8 +298,9 @@ function parseInlineData(data) {
 export async function uploadFile(client, sid, source) {
   try {
     const { raw, filename, mimeType } = await readSource(source)
+    const uploadFilename = uniqueUploadFilename(filename)
     const payload = {
-      filename,
+      filename: uploadFilename,
       content: raw.toString('base64'),
       mimeType,
     }
