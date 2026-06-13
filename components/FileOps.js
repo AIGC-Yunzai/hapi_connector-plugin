@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp'])
 const MEDIA_TYPES = new Set(['image', 'video', 'file', 'record', 'audio'])
+const quotedContextCache = new WeakMap()
 
 async function getFetch() {
   if (globalThis.fetch) return globalThis.fetch.bind(globalThis)
@@ -67,28 +68,111 @@ function normalizeInlineData(raw) {
   return /^(base64:\/\/|data:[^;]+;base64,)/i.test(value) ? value : ''
 }
 
-async function getQuotedMessages(e) {
+async function getQuotedMessageContext(e) {
+  if (!e || typeof e !== 'object') return emptyQuotedContext()
+  const cached = quotedContextCache.get(e)
+  if (cached) return cached
+  const pending = resolveQuotedMessageContext(e)
+  quotedContextCache.set(e, pending)
+  return pending
+}
+
+async function resolveQuotedMessageContext(e) {
   try {
     if (e?.reply_id && typeof e.getReply === 'function') {
       const reply = await e.getReply(e.reply_id)
-      if (Array.isArray(reply)) return reply
-      return Array.isArray(reply?.message) ? reply.message : []
+      const message = Array.isArray(reply) ? reply : Array.isArray(reply?.message) ? reply.message : []
+      if (message.length || reply?.sender) {
+        return {
+          message,
+          senderNickname: senderNameOf(reply?.sender),
+          senderUserId: reply?.sender?.user_id,
+          messageId: e.reply_id,
+        }
+      }
     }
   } catch (err) {
     logger.debug(`[hapi-connector] 获取 reply_id 引用消息失败: ${err.message || err}`)
   }
 
   try {
-    if (!e?.source) return []
+    if (!e?.source) return emptyQuotedContext()
+    if (Array.isArray(e.source.message)) {
+      const sender = await getSourceSender(e).catch(() => null)
+      return {
+        message: e.source.message,
+        senderNickname: senderNameOf(sender),
+        senderUserId: sender?.user_id || e.source.user_id,
+        messageId: e.source.seq || e.source.time,
+      }
+    }
     const history = e.isGroup
       ? await e.group?.getChatHistory?.(e.source.seq, 1)
       : await e.friend?.getChatHistory?.(e.source.time, 1)
-    const message = Array.isArray(history) ? history.pop()?.message : null
-    return Array.isArray(message) ? message : []
+    const record = Array.isArray(history) ? history.pop() : null
+    const message = Array.isArray(record?.message) ? record.message : []
+    const sender = record?.sender || await getSourceSender(e).catch(() => null)
+    return {
+      message,
+      senderNickname: senderNameOf(sender),
+      senderUserId: sender?.user_id || e.source.user_id,
+      messageId: e.source.seq || e.source.time,
+    }
   } catch (err) {
     logger.debug(`[hapi-connector] 获取 source 引用消息失败: ${err.message || err}`)
-    return []
+    return emptyQuotedContext()
   }
+}
+
+function emptyQuotedContext() {
+  return {
+    message: [],
+    senderNickname: '',
+    senderUserId: '',
+    messageId: '',
+  }
+}
+
+async function getSourceSender(e) {
+  if (!e?.source?.user_id) return null
+  if (e.isGroup) {
+    const member = await e.group?.pickMember?.(e.source.user_id)
+    return member ? { card: member.card, nickname: member.nickname, user_id: e.source.user_id } : null
+  }
+  const friend = e.bot?.fl?.get?.(e.source.user_id)
+  return friend ? { card: friend.card, nickname: friend.nickname, user_id: e.source.user_id } : null
+}
+
+function senderNameOf(sender) {
+  return String(sender?.card || sender?.nickname || sender?.name || '').trim()
+}
+
+function textOfMessageItem(item) {
+  if (typeof item === 'string') return item
+  if (!item || typeof item !== 'object') return ''
+  if (item.type !== 'text') return ''
+  return String(item.text ?? item.data?.text ?? item.message ?? '').trim()
+}
+
+function buildQuotedText(context) {
+  const text = context.message.map(textOfMessageItem).filter(Boolean).join('\n')
+  if (!text) return ''
+  const quotedLines = text.split('\n').map(line => `> ${line}`).join('\n')
+  return context.senderNickname
+    ? `> ##### ${context.senderNickname}：\n> ---\n${quotedLines}`
+    : quotedLines
+}
+
+function applyQuotedText(e, context) {
+  const quotedText = buildQuotedText(context)
+  if (!quotedText) return ''
+  e.sourceMsg = quotedText
+  if (context.messageId) e.source_message_id = context.messageId
+  if (context.senderNickname) {
+    e.senderNickname = context.senderNickname
+    e.senderUser_id = context.senderUserId
+  }
+  return quotedText
 }
 
 function pushItemSource(sources, seen, item) {
@@ -131,17 +215,25 @@ function defaultNameForItem(item, value = '') {
 export async function extractUploadSources(e) {
   const sources = []
   const seen = new Set()
+  const quoted = await getQuotedMessageContext(e)
+  applyQuotedText(e, quoted)
   const items = [
     ...(Array.isArray(e?.message) ? e.message : []),
     ...(Array.isArray(e?.source?.message) ? e.source.message : []),
     ...(Array.isArray(e?.img) ? e.img.map(url => ({ type: 'image', url })) : []),
-    ...(await getQuotedMessages(e)),
+    ...quoted.message,
   ]
 
   for (const item of items) {
     pushItemSource(sources, seen, item)
   }
   return sources
+}
+
+export async function extractQuotedText(e) {
+  if (typeof e?.sourceMsg === 'string' && e.sourceMsg.trim()) return e.sourceMsg.trim()
+  const quoted = await getQuotedMessageContext(e)
+  return applyQuotedText(e, quoted)
 }
 
 async function readSource(source) {

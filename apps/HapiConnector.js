@@ -7,6 +7,7 @@ import * as ops from '../components/SessionOps.js'
 import {
   deleteUploadedFile,
   downloadToTmp,
+  extractQuotedText,
   extractUploadSources,
   getRemoteFileSize,
   uploadFile,
@@ -225,7 +226,8 @@ export class HapiConnector extends plugin {
       const session = sessionsCache[Number(match[1]) - 1]
       if (!session) return this.reply(`无效序号 ${match[1]}，共 ${sessionsCache.length} 个 session`)
       const [uploadText, attachments] = await this.uploadMessageAttachments(e, session.id)
-      const [, reply] = await ops.sendMessage(this.client, session.id, match[2], attachments)
+      const messageText = await this.withQuotedText(e, match[2])
+      const [, reply] = await ops.sendMessage(this.client, session.id, messageText, attachments)
       logger.info(`[hapi-connector] quickSend 触发: ${State.formatWindowKey(State.windowKey(e))} -> ${session.id.slice(0, 8)}`)
       if (uploadText) await this.reply(uploadText)
       return this.reply(reply)
@@ -234,7 +236,8 @@ export class HapiConnector extends plugin {
     const sid = State.currentSid(e)
     if (!sid) return this.reply('请先用 #hapi sw <序号> 选择一个 session')
     const [uploadText, attachments] = await this.uploadMessageAttachments(e, sid)
-    const [, reply] = await ops.sendMessage(this.client, sid, rest, attachments)
+    const messageText = await this.withQuotedText(e, rest)
+    const [, reply] = await ops.sendMessage(this.client, sid, messageText, attachments)
     logger.info(`[hapi-connector] quickSend 触发: ${State.formatWindowKey(State.windowKey(e))} -> ${sid.slice(0, 8)}`)
     if (uploadText) await this.reply(uploadText)
     return this.reply(reply)
@@ -255,7 +258,8 @@ export class HapiConnector extends plugin {
     }
 
     const [uploadText, attachments] = await this.uploadMessageAttachments(e, session.id)
-    const [, reply] = await ops.sendMessage(this.client, session.id, text, attachments)
+    const messageText = await this.withQuotedText(e, text)
+    const [, reply] = await ops.sendMessage(this.client, session.id, messageText, attachments)
     logger.info(`[hapi-connector] chat 触发: ${State.formatWindowKey(State.windowKey(e))} -> ${session.id.slice(0, 8)}`)
     if (uploadText) await this.reply(uploadText)
     return this.reply(reply)
@@ -272,7 +276,7 @@ export class HapiConnector extends plugin {
     if (uploadText) await this.reply(uploadText)
     if (!attachments.length) return this.reply('没有成功上传的附件，已取消发送')
 
-    const text = request.text || `请查看这 ${attachments.length} 个附件。`
+    const text = await this.withQuotedText(e, request.text || `请查看这 ${attachments.length} 个附件。`)
     const [, reply] = await ops.sendMessage(this.client, session.id, text, attachments)
     logger.info(`[hapi-connector] quickSend 附件触发: ${State.formatWindowKey(State.windowKey(e))} -> ${session.id.slice(0, 8)} (${attachments.length})`)
     return this.reply(reply)
@@ -370,7 +374,8 @@ export class HapiConnector extends plugin {
     const session = this.resolveSession(parts[0])
     if (!session) return this.reply(`未找到 session：${parts[0]}`)
     const [uploadText, attachments] = await this.uploadMessageAttachments(e, session.id)
-    const [, msg] = await ops.sendMessage(this.client, session.id, arg.slice(parts[0].length).trim(), attachments)
+    const messageText = await this.withQuotedText(e, arg.slice(parts[0].length).trim())
+    const [, msg] = await ops.sendMessage(this.client, session.id, messageText, attachments)
     if (uploadText) await this.reply(uploadText)
     return this.reply(msg)
   }
@@ -975,6 +980,13 @@ export class HapiConnector extends plugin {
       if (ok && attachment) attachments.push(attachment)
     }
     return [lines.join('\n'), attachments]
+  }
+
+  async withQuotedText(e, text) {
+    const quotedText = await extractQuotedText(e)
+    if (!quotedText) return text
+    const message = String(text || '')
+    return message.startsWith(quotedText) ? message : `${quotedText}\n\n${message}`
   }
 
 }
