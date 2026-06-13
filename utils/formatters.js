@@ -90,6 +90,37 @@ export function formatSessionList(sessions, currentSid = '', allSessions = null)
   return lines.join('\n')
 }
 
+export function formatSessionListNodes(sessions, currentSid = '', allSessions = null) {
+  if (!sessions.length) return ['没有任何 session']
+  const indexBySid = new Map()
+  ;(allSessions || sessions).forEach((item, idx) => indexBySid.set(item.id, idx + 1))
+
+  const pathCounts = new Map()
+  for (const session of sessions) {
+    const path = session.metadata?.path || '(无路径)'
+    pathCounts.set(path, (pathCounts.get(path) || 0) + 1)
+  }
+
+  const nodes = [`共 ${sessions.length} 个 Session:`]
+
+  for (const session of sessions) {
+    const meta = session.metadata || {}
+    const path = meta.path || '(无路径)'
+    const title = meta.summary?.text || meta.name || '(无标题)'
+    const status = session.thinking ? '思考中' : session.active ? '运行中' : '已关闭'
+    const pending = session.pendingRequestsCount ? ` | ${session.pendingRequestsCount} 待审批` : ''
+    const current = currentSid === session.id ? ' | <<当前' : ''
+    nodes.push([
+      `目录: ${path} (${pathCounts.get(path) || 1})`,
+      `[${indexBySid.get(session.id)} | ${session.id.slice(0, 8)}] ${title}`,
+      `${status} | ${meta.flavor || '?'}:${session.modelMode || 'default'}${pending}${current}`,
+    ].join('\n'))
+  }
+
+  nodes.push('切换会话：#hapi sw <序号或ID前缀>')
+  return nodes
+}
+
 export function formatSessionStatus(session) {
   const meta = session.metadata || {}
   const lines = [
@@ -242,16 +273,16 @@ export function helpNodes(topic = '') {
 
 function createExampleNode() {
   return [
-    '创建新对话示例',
+    '使用引导模式创建新对话：',
+    ' #hapi create',
     '',
-    '创建 Claude Code 会话，并使用 Opus 模型、high 思考强度、bypassPermissions 权限：',
-    '',
-    '#hapi create my-pc /root/project claude simple opus high bypassPermissions',
+    '创建 Claude Code 会话，并使用 Opus 模型、high 思考强度、bypassPermissions 权限示例：',
+    ' #hapi create my-pc /root/project claude simple opus high bypassPermissions',
     '',
     '如果已经创建好当前 session，也可以分步设置：',
-    '#hapi model opus',
-    '#hapi effort high',
-    '#hapi perm bypassPermissions',
+    ' #hapi model opus',
+    ' #hapi effort high',
+    ' #hapi perm bypassPermissions',
     '',
     '需要 1M 上下文模型时：#hapi model opus[1m]',
   ].join('\n')

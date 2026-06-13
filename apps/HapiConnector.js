@@ -23,6 +23,7 @@ import {
   formatMessageNodes,
   formatPending,
   formatSessionList,
+  formatSessionListNodes,
   formatSessionStatus,
   helpNodes,
   isQuestionRequest,
@@ -304,10 +305,14 @@ export class HapiConnector extends plugin {
     await this.refreshSessions()
     const current = State.currentSid(e)
     if (arg.trim().toLowerCase() === 'all') {
-      return this.reply(formatSessionList(sessionsCache, current))
+      return this.replySessionList(sessionsCache, current)
     }
     const visible = State.visibleSessions(e, sessionsCache)
-    return this.reply(formatSessionList(visible, current, sessionsCache))
+    return this.replySessionList(visible, current, sessionsCache)
+  }
+
+  replySessionList(sessions, current, allSessions = null) {
+    return this.reply(formatSessionListNodes(sessions, current, allSessions))
   }
 
   async cmdSwitch(e, target) {
