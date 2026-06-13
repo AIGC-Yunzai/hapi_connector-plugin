@@ -132,7 +132,11 @@ export class SseListener {
       lastSeq: oldSeq,
     }
 
-    await this.handleRequests(sid, data.agentState?.requests || {})
+    // session-updated 事件是增量推送：只有携带 agentState 的事件才反映完整的待审批集合。
+    // 思考状态等局部更新不带 agentState，若按空集合处理会误删待审批请求，导致 /hapi answer 找不到。
+    if (data.agentState) {
+      await this.handleRequests(sid, data.agentState.requests || {})
+    }
 
     if (wasThinking && !thinking) {
       await this.notifyMessages(sid, oldSeq)
@@ -214,13 +218,19 @@ export class SseListener {
       const visible = messages
         .filter(item => (item.seq || 0) > oldSeq)
         .filter(item => ['agent', 'assistant'].includes(item.content?.message?.role || item.content?.role))
-        .map(item => extractTextPreview(item.content))
+        .map(item => {
+          const text = extractTextPreview(item.content)
+          if (!text) return null
+          const role = item.content?.message?.role || item.content?.role || '?'
+          const seq = item.seq ? ` #${item.seq}` : ''
+          return `${role}${seq}\n${text}`
+        })
         .filter(Boolean)
 
       const count = Number(this.config?.summary_msg_count || 5)
       const picked = this.config?.output_level === 'summary' ? visible.slice(-count) : visible
       if (picked.length) {
-        await this.notify(`${sessionLabel(sid, this.sessions)}\n\n${picked.join('\n\n')}`, sid)
+        await this.notify([sessionLabel(sid, this.sessions), ...picked], sid)
       }
       await this.notify(`会话已完成，等待新的输入\n${sessionLabel(sid, this.sessions)}`, sid)
     } catch (err) {
