@@ -1,8 +1,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { pluginData } from '../model/path.js'
+import { pluginRoot } from '../model/path.js'
 
-const statePath = path.join(pluginData, 'state.json')
+const configDir = path.join(pluginRoot, 'config', 'config')
+const statePath = path.join(configDir, 'state.json')
 
 function blankState() {
   return {
@@ -21,7 +22,7 @@ class State {
 
   load() {
     try {
-      fs.mkdirSync(pluginData, { recursive: true })
+      fs.mkdirSync(configDir, { recursive: true })
       if (fs.existsSync(statePath)) {
         this.data = { ...blankState(), ...JSON.parse(fs.readFileSync(statePath, 'utf8')) }
       }
@@ -32,7 +33,7 @@ class State {
   }
 
   save() {
-    fs.mkdirSync(pluginData, { recursive: true })
+    fs.mkdirSync(configDir, { recursive: true })
     fs.writeFileSync(statePath, JSON.stringify(this.data, null, 2), 'utf8')
   }
 

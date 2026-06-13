@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import YAML from 'yaml'
-import { pluginRoot, pluginData } from '../model/path.js'
+import { pluginRoot } from '../model/path.js'
 
 class Config {
   constructor() {
@@ -14,7 +14,6 @@ class Config {
 
   ensureFiles() {
     fs.mkdirSync(path.dirname(this.configPath), { recursive: true })
-    fs.mkdirSync(pluginData, { recursive: true })
     if (!fs.existsSync(this.configPath)) {
       fs.copyFileSync(this.defaultPath, this.configPath)
       logger.mark('[hapi-connector] 已生成默认配置 config/config/hapi.yaml')
