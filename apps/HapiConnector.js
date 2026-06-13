@@ -204,6 +204,8 @@ export class HapiConnector extends plugin {
 
   async quickSend(e) {
     if (!e.isMaster) return false
+    this.config = Config.getConfig()
+    if (this.config.quick_group_at_bot_only && isGroupMessage(e) && !isAtSelf(e)) return false
     if (!(await this.ready(e))) return true
     const prefix = this.config.quick_prefix || '>'
     const msg = String(e.msg || '')
@@ -1008,6 +1010,15 @@ function parseAttachmentRequest(text) {
 
 function isCancelText(text) {
   return ['0', '取消', '退出', 'cancel', 'q'].includes(String(text || '').trim().toLowerCase())
+}
+
+function isGroupMessage(e) {
+  return Boolean(e?.isGroup || e?.message_type === 'group' || e?.group_id)
+}
+
+function isAtSelf(e) {
+  const selfId = String(e?.self_id || e?.bot?.uin || '')
+  return Boolean(selfId && String(e?.at || '') === selfId)
 }
 
 function isSkipText(text) {

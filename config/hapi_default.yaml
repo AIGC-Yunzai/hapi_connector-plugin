@@ -24,6 +24,9 @@ summary_msg_count: 5
 # 快捷发送前缀。默认 >消息 发到当前 session，>2 消息 发到第 2 个 session
 quick_prefix: ">"
 
+# 群聊快捷发送是否必须 @Bot 才响应
+quick_group_at_bot_only: false
+
 # 待审批提醒与忙时托管审批
 remind_pending: true
 remind_interval: 180

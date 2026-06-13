@@ -212,6 +212,7 @@ Docker、局域网、Tailscale 场景通常需要先设置：
 ```yaml
 enable_sse: true
 output_level: "simple"
+quick_group_at_bot_only: false
 remind_pending: true
 enable_poke_approve: true
 ```

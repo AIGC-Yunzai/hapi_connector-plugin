@@ -79,6 +79,12 @@ export function supportGuoba() {
           component: 'Input',
         },
         {
+          field: 'quick_group_at_bot_only',
+          label: '快捷发送需At',
+          component: 'Switch',
+          bottomHelpMessage: '开启后，群聊 quickSend 仅响应主人且 @Bot 的消息',
+        },
+        {
           field: 'remind_pending',
           label: '待审批提醒',
           component: 'Switch',

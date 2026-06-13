@@ -86,7 +86,7 @@ export function formatSessionList(sessions, currentSid = '', allSessions = null)
     lines.push(`[${idx} | ${session.id.slice(0, 8)}] ${title}`)
     lines.push(`${status} | ${meta.flavor || '?'}:${session.modelMode || 'default'}${pending}${current}`)
   }
-  lines.push('', '切换会话：#hapi sw <序号或ID前缀>')
+  lines.push('', '切换会话：\n #hapi sw <序号或ID前缀>')
   return lines.join('\n')
 }
 
@@ -117,7 +117,7 @@ export function formatSessionListNodes(sessions, currentSid = '', allSessions = 
     ].join('\n'))
   }
 
-  nodes.push('切换会话：#hapi sw <序号或ID前缀>')
+  nodes.push('切换会话：\n #hapi sw <序号或ID前缀>')
   return nodes
 }
 
