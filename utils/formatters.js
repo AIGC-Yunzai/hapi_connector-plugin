@@ -5,7 +5,7 @@ export const PERMISSION_MODES = {
   opencode: ['default', 'yolo'],
 }
 
-export const MODEL_MODES = ['default', 'opus', 'sonnet']
+export const MODEL_MODES = ['default', 'sonnet', 'sonnet[1m]', 'opus', 'opus[1m]', 'fable', 'fable[1m]']
 export const GEMINI_MODEL_MODES = ['default', 'flash', 'pro']
 export const CLAUDE_EFFORTS = ['', 'medium', 'high', 'max']
 export const CODEX_EFFORTS = ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh']
@@ -119,6 +119,20 @@ export function formatMessages(messages) {
   return lines.join('\n\n') || '(暂无可显示的消息)'
 }
 
+export function formatMessageNodes(messages) {
+  if (!messages.length) return ['(暂无消息)']
+  const nodes = []
+  for (const msg of messages) {
+    const content = msg.content || {}
+    const role = content.message?.role || content.role || '?'
+    const text = extractTextPreview(content)
+    if (!text) continue
+    const seq = msg.seq ? ` #${msg.seq}` : ''
+    nodes.push(`${role}${seq}\n${text}`)
+  }
+  return nodes.length ? nodes : ['(暂无可显示的消息)']
+}
+
 export function isQuestionRequest(req) {
   return ['AskUserQuestion', 'ask_user_question', 'request_user_input'].includes(req.tool)
 }
@@ -177,6 +191,10 @@ export function formatSize(size) {
 }
 
 export function helpText(topic = '') {
+  return helpNodes(topic).join('\n\n')
+}
+
+export function helpNodes(topic = '') {
   const full = topic.trim() === '全部' || topic.trim().toLowerCase() === 'all'
   const common = [
     'HAPI Connector 常用命令',
@@ -199,27 +217,47 @@ export function helpText(topic = '') {
   ]
   if (!full) {
     common.push('', '更多：#hapi help 全部')
-    return common.join('\n')
+    return [common.join('\n'), createExampleNode()]
   }
   return [
-    ...common,
-    '#hapi create <machineId> <目录> <agent> [simple|worktree] [yolo]',
-    '#hapi machines          查看在线机器',
-    '#hapi abort [目标]      中断 session',
-    '#hapi archive           归档当前 session',
-    '#hapi resume [目标]     恢复 inactive session',
-    '#hapi delete [目标]     删除 session',
-    '#hapi rename <标题>     重命名当前 session',
-    '#hapi clean [路径] confirm 清理 inactive sessions',
-    '#hapi files [路径]      浏览远端目录',
-    '#hapi find <关键词>     搜索远端文件',
-    '#hapi download <路径>   下载远端文件',
-    '#hapi upload [附件]     上传附件到当前 session',
-    '#hapi read <路径>       读取远端小文件',
-    '#hapi perm [模式]       查看/切换权限模式',
-    '#hapi model [模式]      查看/切换模型',
-    '#hapi effort [值]       查看/切换推理强度',
-    '#hapi output [级别]     查看/切换推送级别',
-    '#hapi routes            查看通知路由',
+    common.join('\n'),
+    [
+      '#hapi create <machineId> <目录> <agent> [simple|worktree] [模型] [推理强度] [权限模式] [yolo]',
+      '#hapi machines          查看在线机器',
+      '#hapi abort [目标]      中断 session',
+      '#hapi archive           归档当前 session',
+      '#hapi resume [目标]     恢复 inactive session',
+      '#hapi delete [目标]     删除 session',
+      '#hapi rename <标题>     重命名当前 session',
+      '#hapi clean [路径] confirm 清理 inactive sessions',
+      '#hapi files [路径]      浏览远端目录',
+      '#hapi find <关键词>     搜索远端文件',
+      '#hapi download <路径>   下载远端文件',
+      '#hapi upload [附件]     上传附件到当前 session',
+      '#hapi read <路径>       读取远端小文件',
+      '#hapi perm [模式]       查看/切换权限模式',
+      '#hapi model [模式]      查看/切换模型，支持 opus[1m]',
+      '#hapi effort [值]       查看/切换推理强度',
+      '#hapi output [级别]     查看/切换推送级别，不带值会等待下一条消息',
+      '#hapi routes            查看通知路由',
+    ].join('\n'),
+    createExampleNode(),
+  ]
+}
+
+function createExampleNode() {
+  return [
+    '创建新对话示例',
+    '',
+    '创建 Claude Code 会话，并使用 Opus 模型、high 思考强度、bypassPermissions 权限：',
+    '',
+    '#hapi create my-pc /root/project claude simple opus high bypassPermissions',
+    '',
+    '如果已经创建好当前 session，也可以分步设置：',
+    '#hapi model opus',
+    '#hapi effort high',
+    '#hapi perm bypassPermissions',
+    '',
+    '需要 1M 上下文模型时：#hapi model opus[1m]',
   ].join('\n')
 }

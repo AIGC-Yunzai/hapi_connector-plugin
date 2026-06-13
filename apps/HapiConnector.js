@@ -11,6 +11,7 @@ import {
   getRemoteFileSize,
   uploadFile,
 } from '../components/FileOps.js'
+import { smartReply } from '../utils/reply.js'
 import {
   CLAUDE_EFFORTS,
   CODEX_EFFORTS,
@@ -19,11 +20,11 @@ import {
   PERMISSION_MODES,
   formatDirectory,
   formatFiles,
-  formatMessages,
+  formatMessageNodes,
   formatPending,
   formatSessionList,
   formatSessionStatus,
-  helpText,
+  helpNodes,
   isQuestionRequest,
 } from '../utils/formatters.js'
 
@@ -55,6 +56,10 @@ export class HapiConnector extends plugin {
     sharedClient ||= new HapiClient(this.config)
     this.client = sharedClient
     booting ||= this.bootstrap()
+  }
+
+  reply(msg = '', quote = false, data = {}) {
+    return smartReply(this.e, msg, quote, data)
   }
 
   async bootstrap() {
@@ -105,7 +110,7 @@ export class HapiConnector extends plugin {
     const cmd = cmdRaw.toLowerCase()
     const arg = rest.join(' ')
 
-    if (!cmd || cmd === 'help' || cmd === '帮助') return this.reply(helpText(arg))
+    if (!cmd || cmd === 'help' || cmd === '帮助') return this.reply(helpNodes(arg))
 
     try {
       switch (cmd) {
@@ -181,7 +186,7 @@ export class HapiConnector extends plugin {
         case 'read':
           return this.cmdRead(e, arg)
         default:
-          return this.reply(`未知命令：/hapi ${cmd}\n\n${helpText()}`)
+          return this.reply([`未知命令：/hapi ${cmd}`, ...helpNodes()])
       }
     } catch (err) {
       logger.error('[hapi-connector] 命令执行失败', err)
@@ -321,7 +326,7 @@ export class HapiConnector extends plugin {
     if (!sid) return this.reply('请先用 /hapi sw <序号> 选择一个 session')
     const limit = Math.min(Math.max(Number(arg) || 10, 1), 100)
     const messages = await ops.fetchMessages(this.client, sid, limit)
-    return this.reply(splitLong(formatMessages(messages)))
+    return this.reply(formatMessageNodes(messages))
   }
 
   async cmdTo(e, arg) {
@@ -392,25 +397,46 @@ export class HapiConnector extends plugin {
     const parts = splitArgs(arg)
     if (parts.length < 3) {
       return this.reply([
-        '用法：/hapi create <machineId> <目录> <agent> [simple|worktree] [yolo] [reasoning]',
+        '用法：/hapi create <machineId> <目录> <agent> [simple|worktree] [模型] [推理强度] [权限模式] [yolo]',
         '示例：/hapi create my-pc E:/myrepo/project codex simple yolo high',
+        '示例：/hapi create my-pc E:/myrepo/project claude simple opus high bypassPermissions',
         '先用 /hapi machines 查看在线 machine',
       ].join('\n'))
     }
     const [machineId, directory, agent, sessionType = 'simple', yolo = '', reasoning = ''] = parts
+    const createOptions = parseCreateOptions(agent, [sessionType, yolo, reasoning, ...parts.slice(6)])
     const payload = {
       directory,
       agent,
-      sessionType,
-      yolo: ['yolo', 'true', '1', '是'].includes(yolo.toLowerCase()),
+      sessionType: createOptions.sessionType,
+      yolo: createOptions.yolo,
     }
-    if (reasoning) payload.modelReasoningEffort = reasoning
+    if (createOptions.effort) payload.modelReasoningEffort = createOptions.effort
     const [ok, msg, sid] = await ops.spawnSession(this.client, machineId, payload)
     if (ok && sid) {
       State.setCurrent(e, sid, agent)
       await this.refreshSessions()
+      await this.applyCreateOptions(sid, agent, createOptions)
     }
     return this.reply(msg)
+  }
+
+  async applyCreateOptions(sid, agent, options) {
+    const flavor = String(agent || '').toLowerCase()
+    const lines = []
+    if (options.model && ['claude', 'gemini'].includes(flavor)) {
+      const [, msg] = await ops.setModelMode(this.client, sid, options.model)
+      lines.push(msg)
+    }
+    if (options.permission) {
+      const [, msg] = await ops.setPermissionMode(this.client, sid, options.permission)
+      lines.push(msg)
+    }
+    if (options.effort && ['claude', 'codex'].includes(flavor)) {
+      const [, msg] = await ops.setEffort(this.client, sid, options.effort, agent)
+      lines.push(msg)
+    }
+    if (lines.length) await this.reply(lines.join('\n'))
   }
 
   async cmdSessionAction(e, arg, action) {
@@ -496,8 +522,11 @@ export class HapiConnector extends plugin {
     const detail = await ops.fetchSessionDetail(this.client, sid)
     const flavor = detail.metadata?.flavor || State.currentFlavor(e) || 'claude'
     const modes = PERMISSION_MODES[flavor] || ['default']
-    if (!arg) return this.reply(`当前: ${detail.permissionMode || 'default'}\n可用: ${modes.join(', ')}`)
-    const target = /^\d+$/.test(arg) ? modes[Number(arg) - 1] : arg
+    if (!arg) {
+      arg = await this.awaitSettingArg(e, `当前权限模式: ${detail.permissionMode || 'default'}\n可用: ${modes.join(', ')}\n请在 120 秒内发送要切换的权限模式，发送“取消”退出`)
+      if (!arg) return true
+    }
+    const target = resolveChoice(arg, modes)
     if (!modes.includes(target)) return this.reply(`无效模式：${arg}\n可用: ${modes.join(', ')}`)
     const [, msg] = await ops.setPermissionMode(this.client, sid, target)
     return this.reply(msg)
@@ -510,8 +539,11 @@ export class HapiConnector extends plugin {
     const flavor = detail.metadata?.flavor || 'claude'
     const modes = flavor === 'gemini' ? GEMINI_MODEL_MODES : MODEL_MODES
     if (!['claude', 'gemini'].includes(flavor)) return this.reply('模型切换仅支持 Claude / Gemini session')
-    if (!arg) return this.reply(`当前模型: ${detail.modelMode || 'default'}\n可用: ${modes.join(', ')}`)
-    const target = /^\d+$/.test(arg) ? modes[Number(arg) - 1] : arg
+    if (!arg) {
+      arg = await this.awaitSettingArg(e, `当前模型: ${detail.modelMode || 'default'}\n可用: ${modes.join(', ')}\n请在 120 秒内发送要切换的模型，发送“取消”退出`)
+      if (!arg) return true
+    }
+    const target = resolveChoice(arg, modes, { model: true })
     if (!modes.includes(target)) return this.reply(`无效模型：${arg}\n可用: ${modes.join(', ')}`)
     const [, msg] = await ops.setModelMode(this.client, sid, target)
     return this.reply(msg)
@@ -524,11 +556,34 @@ export class HapiConnector extends plugin {
     const flavor = detail.metadata?.flavor || 'claude'
     if (!['claude', 'codex'].includes(flavor)) return this.reply('推理强度仅支持 Claude / Codex session')
     const values = flavor === 'codex' ? CODEX_EFFORTS : CLAUDE_EFFORTS
-    if (!arg) return this.reply(`可用: ${values.map(item => item || (flavor === 'codex' ? 'inherit' : 'auto')).join(', ')}`)
-    const normalized = ['inherit', 'auto', 'default'].includes(arg) ? '' : arg
+    const labels = values.map(item => item || (flavor === 'codex' ? 'inherit' : 'auto'))
+    if (!arg) {
+      arg = await this.awaitSettingArg(e, `可用推理强度: ${labels.join(', ')}\n请在 120 秒内发送要切换的值，发送“取消”退出`)
+      if (!arg) return true
+    }
+    const lowerArg = String(arg || '').trim().toLowerCase()
+    const normalized = ['inherit', 'auto', 'default'].includes(lowerArg) ? '' : lowerArg
     if (!values.includes(normalized)) return this.reply(`无效值：${arg}`)
     const [, msg] = await ops.setEffort(this.client, sid, normalized, flavor)
     return this.reply(msg)
+  }
+
+  async awaitSettingArg(e, prompt) {
+    await this.reply(prompt)
+    while (true) {
+      const next = await this.awaitContext(e.isGroup, 120, '等待输入超时，已取消')
+      if (!next) return ''
+      if (!sameSender(e, next)) {
+        await this.reply('已忽略其他用户发送的消息，请继续发送设置值', true, { recallMsg: 10 })
+        continue
+      }
+      const text = String(next.msg || '').trim()
+      if (isCancelText(text)) {
+        await this.reply('已取消设置', true)
+        return ''
+      }
+      return text
+    }
   }
 
   async cmdPlan(e) {
@@ -551,11 +606,15 @@ export class HapiConnector extends plugin {
 
   async cmdOutput(e, arg) {
     const levels = ['silence', 'simple', 'summary', 'detail']
-    if (!arg) return this.reply(`当前推送级别: ${this.config.output_level}\n可用: ${levels.join(', ')}`)
-    if (!levels.includes(arg)) return this.reply(`无效级别：${arg}`)
-    Config.updateConfig('output_level', arg)
+    if (!arg) {
+      arg = await this.awaitSettingArg(e, `当前推送级别: ${this.config.output_level}\n可用: ${levels.join(', ')}\n请在 120 秒内发送要切换的推送级别，发送“取消”退出`)
+      if (!arg) return true
+    }
+    const target = resolveChoice(arg, levels)
+    if (!levels.includes(target)) return this.reply(`无效级别：${arg}\n可用: ${levels.join(', ')}`)
+    Config.updateConfig('output_level', target)
     sharedSse?.start(Config.getConfig())
-    return this.reply(`推送级别已切换为: ${arg}`)
+    return this.reply(`推送级别已切换为: ${target}`)
   }
 
   async cmdBind(e, arg) {
@@ -706,7 +765,7 @@ export class HapiConnector extends plugin {
     const event = await buildEventFromWindowKey(key)
     if (event?.reply) {
       try {
-        await event.reply(msg)
+        await smartReply(event, msg)
         return
       } catch (err) {
         logger.debug(`[hapi-connector] 重建事件 reply 失败，尝试缓存事件: ${err.message || err}`)
@@ -715,7 +774,7 @@ export class HapiConnector extends plugin {
     const cachedEvent = State.eventCache.get(key)
     if (cachedEvent?.reply) {
       try {
-        await cachedEvent.reply(msg)
+        await smartReply(cachedEvent, msg)
         return
       } catch (err) {
         logger.debug(`[hapi-connector] 缓存事件 reply 失败，尝试直接发送: ${err.message || err}`)
@@ -780,6 +839,62 @@ function isCancelText(text) {
   return ['0', '取消', '退出', 'cancel', 'q'].includes(String(text || '').trim().toLowerCase())
 }
 
+function resolveChoice(input, values, options = {}) {
+  const raw = String(input || '').trim()
+  if (/^\d+$/.test(raw)) return values[Number(raw) - 1]
+  const normalized = options.model ? normalizeModelInput(raw) : raw
+  return values.find(item => item.toLowerCase() === normalized.toLowerCase()) ?? normalized
+}
+
+function normalizeModelInput(input) {
+  const value = String(input || '').trim()
+  const match = value.match(/^(opus|sonnet|fable)(?:\[?1m\]?|-?1m)$/i)
+  if (match) return `${match[1].toLowerCase()}[1m]`
+  return value
+}
+
+function parseCreateOptions(agent, tokens = []) {
+  const flavor = String(agent || '').toLowerCase()
+  const modelModes = flavor === 'gemini' ? GEMINI_MODEL_MODES : flavor === 'claude' ? MODEL_MODES : []
+  const efforts = flavor === 'codex' ? CODEX_EFFORTS : flavor === 'claude' ? CLAUDE_EFFORTS : []
+  const permissionModes = PERMISSION_MODES[flavor] || []
+  const options = {
+    sessionType: 'simple',
+    yolo: false,
+    model: '',
+    effort: '',
+    permission: '',
+  }
+
+  for (const token of tokens.map(item => String(item || '').trim()).filter(Boolean)) {
+    const lower = token.toLowerCase()
+    if (['simple', 'worktree'].includes(lower)) {
+      options.sessionType = lower
+      continue
+    }
+    if (['yolo', 'true', '1', '是'].includes(lower)) {
+      options.yolo = true
+      continue
+    }
+    const model = resolveChoice(token, modelModes, { model: true })
+    if (modelModes.includes(model)) {
+      options.model = model
+      continue
+    }
+    const effort = ['inherit', 'auto', 'default'].includes(lower) ? '' : lower
+    if (efforts.includes(effort)) {
+      options.effort = effort
+      continue
+    }
+    const permission = resolveChoice(token, permissionModes)
+    if (permissionModes.includes(permission)) {
+      options.permission = permission
+    }
+  }
+
+  return options
+}
+
 function sourceKey(source) {
   if (!source) return ''
   if (source.kind === 'path') return `path:${source.path}`
@@ -795,8 +910,10 @@ async function sendByWindowKey(key, text) {
   try {
     const [, self, type, id] = key.split(':')
     const bot = global.Bot?.[self] || global.Bot
-    if (type === 'group') return bot.pickGroup(id).sendMsg(text)
-    return bot.pickUser(id).sendMsg(text)
+    const target = type === 'group' ? bot.pickGroup(id) : bot.pickUser(id)
+    return smartReply({
+      reply: msg => target.sendMsg(msg),
+    }, text)
   } catch (err) {
     logger.debug(`[hapi-connector] 主动推送失败: ${err.message || err}`)
   }

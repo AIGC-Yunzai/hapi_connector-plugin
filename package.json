@@ -2,6 +2,8 @@
   "name": "hapi_connector-plugin",
   "version": "1.0.0",
   "description": "Yunzai plugin for remote HAPI coding sessions",
+  "author": "misaka20002,127Wzc",
+  "license": "AGPL-3.0-or-later",
   "main": "index.js",
   "type": "module",
   "module": "index.js",
@@ -10,7 +12,5 @@
     "HAPI",
     "Claude Code",
     "Codex"
-  ],
-  "author": "Misaka20002",
-  "license": "AGPL-3.0-or-later"
+  ]
 }

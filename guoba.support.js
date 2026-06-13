@@ -5,7 +5,9 @@ export function supportGuoba() {
     pluginInfo: {
       name: 'hapi_connector-plugin',
       title: 'HAPI Connector',
-      author: ['@Misaka20002'],
+      author: ['@misaka20002', '@127Wzc'],
+      authorLink: ['https://github.com/misaka20002', 'https://github.com/127Wzc'],
+      link: 'https://github.com/AIGC-Yunzai/hapi_connector-plugin',
       isV3: true,
       isV2: false,
       showInMenu: true,
