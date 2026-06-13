@@ -225,50 +225,89 @@ export function helpText(topic = '') {
   return helpNodes(topic).join('\n\n')
 }
 
-export function helpNodes(topic = '') {
-  const common = [
-    'HAPI Connector 常用命令',
-    '',
-    '#hapi list [all]        查看[当前聊天/全部] session',
-    '#hapi sw <序号|ID前缀>  切换当前 session',
-    '#hapi s                 查看当前状态',
-    '#hapi msg [条数]        查看最近消息',
-    '#hapi to <序号> <内容>  发消息到指定 session',
-    '> 内容                  快捷发到当前 session',
-    '>{2} 内容               快捷发到第 2 个 session',
-    '> 上传附件3张 [内容]      等待附件后发到当前 session',
-    '> {2} 上传附件5份 [内容]  等待附件后发到第 2 个 session',
-    '#hapi pending           查看待审批',
-    '#hapi a                 批准全部普通请求',
-    '#hapi deny [序号]       拒绝请求',
-    '#hapi bind [flavor]     设置默认通知窗口',
-    '#hapi更新              更新插件',
-    '#hapi强制更新          强制更新插件',
-  ]
+export function helpNodes(topic = '', config = {}) {
+  const quickPrefix = quickSendHelpPrefix(config)
+  const quickSendLines = quickPrefix
+    ? [
+        `${quickPrefix} 内容                  快捷发到当前 session`,
+        `${quickPrefix}{2} 内容               快捷发到第 2 个 session`,
+        `${quickPrefix} 上传附件3张 [内容]      等待附件后发到当前 session`,
+        `${quickPrefix} {2} 上传附件5份 [内容]  等待附件后发到第 2 个 session`,
+      ]
+    : ['快捷发送已关闭，可在锅巴中开启并设置快捷前缀']
+
   return [
-    common.join('\n'),
     [
-      '#hapi create <machineId> <目录> <agent> [simple|worktree] [模型] [推理强度] [权限模式] [yolo]',
+      'HAPI Connector / 会话与对话',
+      '',
+      '#hapi list [all]        查看[当前聊天/全部] session',
+      '#hapi sw <序号|ID前缀>  切换当前 session',
+      '#hapi s                 查看当前状态',
+      '#hapi msg [条数]        查看最近消息',
+      '#hapi chat <内容>       发消息到当前 session',
+      '#hapi chat2 <内容>      发消息到第 2 个 session',
+      '#hapi to <序号> <内容>  发消息到指定 session',
+      ...quickSendLines,
+    ].join('\n'),
+    [
+      '权限审批',
+      '',
+      '#hapi pending           查看待审批',
+      '#hapi a                 批准全部普通请求',
+      '#hapi allow <序号>      批准单个普通请求',
+      '#hapi answer <序号> <答案> 回答 question 请求，不是普通聊天',
+      '#hapi deny [序号]       拒绝全部或单个请求',
+      '戳一戳机器人            批准全部普通请求',
+    ].join('\n'),
+    [
+      'Session 管理',
+      '',
       '#hapi machines          查看在线机器',
+      '#hapi create <machineId> <目录> <agent> [simple|worktree] [模型] [推理强度] [权限模式] [yolo]',
       '#hapi abort [目标]      中断 session',
+      '#hapi remote            切到 remote 托管模式',
       '#hapi archive           归档当前 session',
       '#hapi resume [目标]     恢复 inactive session',
       '#hapi delete [目标]     删除 session',
       '#hapi rename <标题>     重命名当前 session',
       '#hapi clean [路径] confirm 清理 inactive sessions',
+    ].join('\n'),
+    [
+      '文件操作',
+      '',
       '#hapi files [路径]      浏览远端目录',
+      '#hapi files -l [路径]   浏览目录并显示大小',
       '#hapi find <关键词>     搜索远端文件',
+      '#hapi read <路径>       读取远端小文件',
       '#hapi download <路径>   下载远端文件',
       '#hapi upload [附件]     上传附件到当前 session',
-      '#hapi read <路径>       读取远端小文件',
+      '#hapi upload cancel     删除当前 session 已上传 blob',
+    ].join('\n'),
+    [
+      '模式与通知',
+      '',
       '#hapi perm [模式]       查看/切换权限模式',
       '#hapi model [模式]      查看/切换模型，支持 opus[1m]',
       '#hapi effort [值]       查看/切换推理强度',
+      '#hapi plan              切换 Plan 模式',
       '#hapi output [级别]     查看/切换推送级别，不带值会等待下一条消息',
+      '#hapi bind [flavor]     设置默认通知窗口',
+      '#hapi bind status       查看通知路由',
+      '#hapi bind reset        清除当前窗口绑定',
       '#hapi routes            查看通知路由',
+      '#hapi更新              更新插件',
+      '#hapi强制更新          强制更新插件',
     ].join('\n'),
     createExampleNode(),
   ]
+}
+
+function quickSendHelpPrefix(config = {}) {
+  if (config.quick_send_enabled === false) return ''
+  const prefix = config.quick_prefix === undefined || config.quick_prefix === null
+    ? '>'
+    : String(config.quick_prefix)
+  return prefix
 }
 
 function createExampleNode() {

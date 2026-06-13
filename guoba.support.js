@@ -19,7 +19,7 @@ export function supportGuoba() {
       schemas: [
         {
           component: 'Divider',
-          label: '连接与认证',
+          label: '连接设置',
           componentProps: { orientation: 'left', plain: true },
         },
         {
@@ -52,7 +52,30 @@ export function supportGuoba() {
         },
         {
           component: 'Divider',
-          label: '推送与审批',
+          label: '触发设置',
+          componentProps: { orientation: 'left', plain: true },
+        },
+        {
+          field: 'quick_send_enabled',
+          label: '启用快捷发送',
+          component: 'Switch',
+          bottomHelpMessage: '关闭后不响应 quickSend，例如 "> 内容" 或自定义快捷前缀消息',
+        },
+        {
+          field: 'quick_prefix',
+          label: '快捷前缀',
+          component: 'Input',
+          bottomHelpMessage: '默认 >；例如 "> 内容" 发到当前 session，">{2} 内容" 发到第 2 个 session。留空会关闭 quickSend；默认 > 时兼容全角 ＞',
+        },
+        {
+          field: 'quick_group_at_bot_only',
+          label: '群聊快捷发送需 @Bot',
+          component: 'Switch',
+          bottomHelpMessage: '仅影响 quickSend。开启后，群聊只响应主人且 @Bot 的快捷发送消息',
+        },
+        {
+          component: 'Divider',
+          label: '推送设置',
           componentProps: { orientation: 'left', plain: true },
         },
         {
@@ -74,15 +97,9 @@ export function supportGuoba() {
           },
         },
         {
-          field: 'quick_prefix',
-          label: '快捷前缀',
-          component: 'Input',
-        },
-        {
-          field: 'quick_group_at_bot_only',
-          label: '快捷发送需At',
-          component: 'Switch',
-          bottomHelpMessage: '开启后，群聊 quickSend 仅响应主人且 @Bot 的消息',
+          component: 'Divider',
+          label: '审批设置',
+          componentProps: { orientation: 'left', plain: true },
         },
         {
           field: 'remind_pending',

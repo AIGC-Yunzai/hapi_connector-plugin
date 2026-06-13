@@ -21,7 +21,10 @@ refresh_before_expiry: 180
 output_level: "simple"
 summary_msg_count: 5
 
-# 快捷发送前缀。默认 >消息 发到当前 session，>2 消息 发到第 2 个 session
+# 是否启用快捷发送
+quick_send_enabled: true
+
+# 快捷发送前缀。默认 >消息 发到当前 session，>{2} 消息 发到第 2 个 session；留空关闭快捷发送
 quick_prefix: ">"
 
 # 群聊快捷发送是否必须 @Bot 才响应

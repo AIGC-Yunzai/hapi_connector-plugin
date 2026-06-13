@@ -54,7 +54,7 @@ export class HapiConnector extends plugin {
           fnc: 'hapi',
         },
         {
-          reg: '^[>＞][\\s\\S]+$',
+          reg: '^[\\s\\S]+$',
           fnc: 'quickSend',
           log: false,
         },
@@ -118,9 +118,12 @@ export class HapiConnector extends plugin {
     const cmd = cmdRaw.toLowerCase()
     const arg = rest.join(' ')
 
-    if (!cmd || cmd === 'help' || cmd === '帮助') return this.reply(helpNodes(arg))
+    if (!cmd || cmd === 'help' || cmd === '帮助') return this.reply(helpNodes(arg, this.config))
 
     try {
+      const chatMatch = cmd.match(/^chat(\d*)$/)
+      if (chatMatch) return this.cmdChat(e, arg, chatMatch[1] || '')
+
       switch (cmd) {
         case 'list':
         case 'ls':
@@ -194,7 +197,7 @@ export class HapiConnector extends plugin {
         case 'read':
           return this.cmdRead(e, arg)
         default:
-          return this.reply([`未知命令：#hapi ${cmd}`, ...helpNodes()])
+          return this.reply([`未知命令：#hapi ${cmd}`, ...helpNodes('', this.config)])
       }
     } catch (err) {
       logger.error('[hapi-connector] 命令执行失败', err)
@@ -205,13 +208,12 @@ export class HapiConnector extends plugin {
   async quickSend(e) {
     if (!e.isMaster) return false
     this.config = Config.getConfig()
+    const msg = String(e.msg || '')
+    const rest = quickSendBody(msg, this.config)
+    if (rest === null) return false
     if (this.config.quick_group_at_bot_only && isGroupMessage(e) && !isAtSelf(e)) return false
     if (!(await this.ready(e))) return true
-    const prefix = this.config.quick_prefix || '>'
-    const msg = String(e.msg || '')
-    if (!msg.startsWith(prefix) && !(prefix === '>' && msg.startsWith('＞'))) return false
 
-    const rest = msg.slice(msg.startsWith(prefix) ? prefix.length : 1).trim()
     if (!rest) return false
     const attachmentRequest = parseAttachmentRequest(rest)
     if (attachmentRequest) return this.quickSendAttachments(e, attachmentRequest)
@@ -234,6 +236,27 @@ export class HapiConnector extends plugin {
     const [uploadText, attachments] = await this.uploadMessageAttachments(e, sid)
     const [, reply] = await ops.sendMessage(this.client, sid, rest, attachments)
     logger.info(`[hapi-connector] quickSend 触发: ${State.formatWindowKey(State.windowKey(e))} -> ${sid.slice(0, 8)}`)
+    if (uploadText) await this.reply(uploadText)
+    return this.reply(reply)
+  }
+
+  async cmdChat(e, text, index = '') {
+    if (!text) return this.reply(`用法：#hapi chat${index || ''} <内容>`)
+
+    let session
+    if (index) {
+      await this.refreshSessions()
+      session = sessionsCache[Number(index) - 1]
+      if (!session) return this.reply(`无效序号 ${index}，共 ${sessionsCache.length} 个 session`)
+    } else {
+      const sid = State.currentSid(e)
+      if (!sid) return this.reply('请先用 #hapi sw <序号> 选择一个 session')
+      session = { id: sid }
+    }
+
+    const [uploadText, attachments] = await this.uploadMessageAttachments(e, session.id)
+    const [, reply] = await ops.sendMessage(this.client, session.id, text, attachments)
+    logger.info(`[hapi-connector] chat 触发: ${State.formatWindowKey(State.windowKey(e))} -> ${session.id.slice(0, 8)}`)
     if (uploadText) await this.reply(uploadText)
     return this.reply(reply)
   }
@@ -995,6 +1018,17 @@ function isSessionRpcPending(msg = '') {
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function quickSendBody(msg, config = {}) {
+  if (config.quick_send_enabled === false) return null
+  const prefix = config.quick_prefix === undefined || config.quick_prefix === null
+    ? '>'
+    : String(config.quick_prefix)
+  if (!prefix) return null
+  if (msg.startsWith(prefix)) return msg.slice(prefix.length).trim()
+  if (prefix === '>' && msg.startsWith('＞')) return msg.slice(1).trim()
+  return null
 }
 
 function parseAttachmentRequest(text) {

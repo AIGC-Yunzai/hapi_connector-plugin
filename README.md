@@ -72,6 +72,13 @@ hapi_endpoint: "http://127.0.0.1:3006"
 access_token: "your-token"
 ```
 
+快捷发送默认开启，默认前缀为 `>`；如果不想响应 quickSend，可以在锅巴关闭“启用快捷发送”，或把 `quick_prefix` 留空：
+
+```yaml
+quick_send_enabled: true
+quick_prefix: ">"
+```
+
 改完连接配置后重启云崽，让 SSE 监听和运行时缓存完整生效。
 
 ## 指令前缀
@@ -91,6 +98,8 @@ access_token: "your-token"
 >{2} 帮我看一下报错
 ```
 
+也可以在锅巴里修改快捷前缀；当前缀为默认 `>` 时，同时兼容全角 `＞`。
+
 ## 常用命令
 
 ### 会话查看
@@ -106,6 +115,8 @@ access_token: "your-token"
 ### 消息发送
 
 ```text
+#hapi chat <内容>          发送到当前 session
+#hapi chatN <内容>         发送到第 N 个 session，例如 #hapi chat2 继续
 #hapi to <序号> <内容>      发送到指定 session
 > 内容                     快捷发送到当前 session
 >{N} 内容                    快捷发送到第 N 个 session
@@ -113,7 +124,7 @@ access_token: "your-token"
 > {N} 上传附件5份 [内容]     等待 5 个附件后发送到第 N 个 session
 ```
 
-快捷发送、`#hapi to` 支持同一条消息附带图片/视频/文件等附件，插件会先上传附件到 HAPI，再把附件引用随消息发送。`> 上传附件3张` 会进入等待模式，按提示继续发送附件即可。
+快捷发送、`#hapi chat`、`#hapi chatN`、`#hapi to` 支持同一条消息附带图片/视频/文件等附件，插件会先上传附件到 HAPI，再把附件引用随消息发送。`> 上传附件3张` 会进入等待模式，按提示继续发送附件即可。
 
 ### Session 管理
 
@@ -154,6 +165,8 @@ access_token: "your-token"
 #hapi deny [序号]         拒绝全部或单个请求
 戳一戳机器人              批准全部普通请求
 ```
+
+`#hapi answer` 只用于回答 HAPI agent 发起的 question 请求，不会把内容当作普通聊天消息发送。普通对话请使用 `#hapi chat <内容>`、`#hapi chatN <内容>`、`#hapi to <序号> <内容>` 或快捷发送。
 
 ### 文件操作
 
