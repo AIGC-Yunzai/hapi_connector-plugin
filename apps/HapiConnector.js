@@ -394,7 +394,7 @@ export class HapiConnector extends plugin {
   async cmdAllow(e, arg) {
     const item = this.findPending(arg)
     if (!item) return this.reply('未找到待审批请求')
-    if (isQuestionRequest(item.req)) return this.reply('这是 question 请求，请用 #hapi answer <序号> <答案>')
+    if (isQuestionRequest(item.req)) return this.reply('这是 question 请求，请用\n #hapi answer <序号> <答案>')
     const [, msg] = await ops.approvePermission(this.client, item.sid, item.rid)
     return this.reply(msg)
   }
@@ -404,7 +404,7 @@ export class HapiConnector extends plugin {
     const item = this.findPending(parts[0])
     if (!item) return this.reply('未找到待回答请求')
     const answer = parts.slice(1).join(' ')
-    if (!answer) return this.reply('用法：#hapi answer <序号> <答案或选项>')
+    if (!answer) return this.reply('用法：\n #hapi answer <序号> <答案或选项>')
     const answers = { 0: [answer] }
     const [, msg] = await ops.approvePermission(this.client, item.sid, item.rid, answers)
     return this.reply(msg)

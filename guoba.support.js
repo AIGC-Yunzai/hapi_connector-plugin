@@ -44,11 +44,13 @@ export function supportGuoba() {
           field: 'cf_access_client_id',
           label: 'CF Access Client ID',
           component: 'InputPassword',
+          bottomHelpMessage: '可选，当需要使用 Cloudflare Zero Trust Service 隧道时填写；详细步骤见 docs/cf-access-guide.md',
         },
         {
           field: 'cf_access_client_secret',
           label: 'CF Access Client Secret',
           component: 'InputPassword',
+          bottomHelpMessage: '同上',
         },
         {
           component: 'Divider',
@@ -82,6 +84,7 @@ export function supportGuoba() {
           field: 'enable_sse',
           label: '启用 SSE',
           component: 'Switch',
+          bottomHelpMessage: '开启后能实时推送 hapi 对话消息',
         },
         {
           field: 'output_level',
@@ -105,6 +108,7 @@ export function supportGuoba() {
           field: 'remind_pending',
           label: '待审批提醒',
           component: 'Switch',
+          bottomHelpMessage: 'hapi 遇到需要审批的任务时推送提醒',
         },
         {
           field: 'remind_interval',
@@ -122,16 +126,19 @@ export function supportGuoba() {
           field: 'auto_approve_enabled',
           label: '忙时托管审批',
           component: 'Switch',
+          bottomHelpMessage: '危险功能：开启后自动通过所有需要审批的内容；但对于AskUserQuestion / ask_user_question / request_user_input 这类 question 请求无法自动审批',
         },
         {
           field: 'auto_approve_start',
           label: '托管开始',
           component: 'Input',
+          bottomHelpMessage: '填写24进制时间，如 23:00',
         },
         {
           field: 'auto_approve_end',
           label: '托管结束',
           component: 'Input',
+          bottomHelpMessage: '填写24进制时间，如 07:00',
         },
       ],
       getConfigData() {

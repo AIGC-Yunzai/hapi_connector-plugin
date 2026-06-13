@@ -226,6 +226,8 @@ cf_access_client_id: ""
 cf_access_client_secret: ""
 ```
 
+详细步骤见：[Cloudflare Zero Trust Access 配置指南](cf-access-guide.md)。
+
 如果服务器访问 HAPI 要走 HTTP/HTTPS 代理，再填写：
 
 ```yaml

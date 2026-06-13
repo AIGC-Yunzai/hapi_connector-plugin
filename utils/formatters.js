@@ -187,7 +187,7 @@ export function formatPending(pending, sessions) {
   for (const [sid, rid, req] of items) {
     lines.push('', `[${req.index || 0}] ${sessionLabel(sid, sessions)}`)
     lines.push(`  ${formatRequestDetail(req)}`)
-    if (isQuestionRequest(req)) lines.push('  这是 question 请求，请用 #hapi answer <序号> <答案> 回答')
+    if (isQuestionRequest(req)) lines.push('  这是 question 请求，请用\n #hapi answer <序号> <答案> 回答')
   }
   lines.push('', '#hapi a 批准全部普通请求')
   lines.push('#hapi allow <序号> 批准单个普通请求')

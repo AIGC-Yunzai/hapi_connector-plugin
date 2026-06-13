@@ -42,7 +42,7 @@ export class hapiPokeApprove extends plugin {
       }
     }
     if (!client || !items.length) {
-      if (questionCount) await e.reply(`还有 ${questionCount} 个 question 请求，请用 #hapi answer <序号> <答案> 回答`)
+      if (questionCount) await e.reply(`还有 ${questionCount} 个 question 请求，请用\n #hapi answer <序号> <答案> 回答`)
       return false
     }
 
@@ -51,7 +51,7 @@ export class hapiPokeApprove extends plugin {
       const [ok, msg] = await ops.approvePermission(client, item.sid, item.rid)
       lines.push(`${ok ? 'OK' : 'FAIL'} #${item.req.index}: ${msg}`)
     }
-    if (questionCount) lines.push(`还有 ${questionCount} 个 question 请求需回答：#hapi answer <序号> <答案>`)
+    if (questionCount) lines.push(`还有 ${questionCount} 个 question 请求需回答：\n #hapi answer <序号> <答案>`)
     await e.reply(`[戳一戳审批]\n${lines.join('\n')}`)
     return true
   }
