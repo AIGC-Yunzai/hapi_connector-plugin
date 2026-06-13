@@ -488,9 +488,33 @@ export class HapiConnector extends plugin {
 
   async selectMachineDirectory(e, machine) {
     const machineId = machineIdOf(machine)
-    let current = machineDefaultPath(machine)
+    const roots = machineWorkspaceRoots(machine)
+    let current = roots.length > 1 ? '' : machineDefaultPath(machine)
 
     while (true) {
+      if (!current && roots.length > 1) {
+        const input = await this.awaitSettingArg(e, [
+          '请选择远端工作目录根目录：',
+          roots.map((root, idx) => `${idx + 1}. ${root}`).join('\n'),
+          '',
+          '发送序号直接选择根目录，发送“cd 序号”进入该根目录；也可以直接输入完整路径。',
+        ].join('\n'))
+        if (!input) return ''
+        const text = input.trim()
+        const cdMatch = text.match(/^cd\s+(\d+)$/i)
+        if (cdMatch) {
+          const root = roots[Number(cdMatch[1]) - 1]
+          if (!root) {
+            await this.reply(`无效目录序号：${cdMatch[1]}`)
+            continue
+          }
+          current = root
+          continue
+        }
+        if (/^\d+$/.test(text) && roots[Number(text) - 1]) return roots[Number(text) - 1]
+        return text
+      }
+
       let dirs = []
       let listError = ''
       try {
@@ -509,15 +533,25 @@ export class HapiConnector extends plugin {
             `请选择远端工作目录，当前浏览：${current}`,
             dirs.length ? dirs.map((item, idx) => `${idx + 1}. ${directoryEntryName(item)}`).join('\n') : '(当前目录下没有可显示的子目录)',
             '',
-            '发送序号选择目录，发送“cd 序号”进入子目录，发送“..”返回上级；也可以直接输入完整路径。',
+            roots.length > 1
+              ? '发送“.”选择当前目录，发送序号选择子目录，发送“cd 序号”进入子目录，发送“..”返回上级，发送“roots”返回根目录列表；也可以直接输入完整路径。'
+              : '发送“.”选择当前目录，发送序号选择子目录，发送“cd 序号”进入子目录，发送“..”返回上级；也可以直接输入完整路径。',
           ].join('\n')
 
       const input = await this.awaitSettingArg(e, prompt)
       if (!input) return ''
       const text = input.trim()
       const lower = text.toLowerCase()
+      if (roots.length > 1 && ['root', 'roots'].includes(lower)) {
+        current = ''
+        continue
+      }
+      if (text === '.') return current
       if (lower === '..') {
-        current = parentPath(current)
+        const parent = parentPath(current)
+        current = roots.length && !isPathWithinRoots(parent, roots)
+          ? roots.length > 1 ? '' : roots[0]
+          : parent
         continue
       }
       const cdMatch = text.match(/^cd\s+(\d+)$/i)
@@ -975,7 +1009,11 @@ function formatMachineChoices(machines) {
   return machines.map((machine, idx) => {
     const id = machineIdOf(machine)
     const name = machine.name && machine.name !== id ? `\n${machine.name}` : ''
-    return `[${idx + 1}] ${id}${name}`
+    const roots = machineWorkspaceRoots(machine)
+    const rootText = roots.length
+      ? `\n工作目录:\n${roots.map((root, rootIdx) => `  ${rootIdx + 1}. ${root}`).join('\n')}`
+      : ''
+    return `[${idx + 1}] ${id}${name}${rootText}`
   }).join('\n\n')
 }
 
@@ -989,8 +1027,27 @@ function machineIdOf(machine) {
   return String(machine?.id || machine?.machineId || machine?.name || '')
 }
 
+function machineWorkspaceRoots(machine) {
+  const meta = machine?.metadata || machine?.data || machine || {}
+  const roots = []
+  for (const key of ['workspaceRoots', 'workspace_roots']) {
+    if (!Array.isArray(meta[key])) continue
+    for (const root of meta[key]) {
+      const value = String(root || '').trim()
+      if (value) roots.push(value)
+    }
+  }
+  for (const key of ['workspaceRoot', 'workspace_root']) {
+    const value = String(meta[key] || '').trim()
+    if (value) roots.push(value)
+  }
+  return Array.from(new Set(roots))
+}
+
 function machineDefaultPath(machine) {
   const meta = machine?.metadata || machine?.data || machine || {}
+  const roots = machineWorkspaceRoots(machine)
+  if (roots[0]) return roots[0]
   const candidates = [
     meta.workspaceRoot,
     meta.workspace_root,
@@ -1000,8 +1057,6 @@ function machineDefaultPath(machine) {
     meta.homeDir,
     meta.home,
   ].filter(Boolean)
-  if (Array.isArray(meta.workspaceRoots) && meta.workspaceRoots[0]) candidates.unshift(meta.workspaceRoots[0])
-  if (Array.isArray(meta.workspace_roots) && meta.workspace_roots[0]) candidates.unshift(meta.workspace_roots[0])
   if (candidates[0]) return String(candidates[0])
   const platform = String(meta.platform || meta.os || '').toLowerCase()
   return platform.includes('win') ? 'C:/' : '/'
@@ -1036,6 +1091,23 @@ function parentPath(path) {
   const idx = Math.max(value.lastIndexOf('/'), value.lastIndexOf('\\'))
   if (idx <= 0) return value.includes(':') ? `${value.slice(0, 2)}/` : '/'
   return value.slice(0, idx)
+}
+
+function isPathWithinRoots(path, roots) {
+  const target = normalizeRemotePath(path)
+  return roots.some(root => {
+    const base = normalizeRemotePath(root)
+    const [left, right] = /^[a-z]:/i.test(base) || /^[a-z]:/i.test(target)
+      ? [target.toLowerCase(), base.toLowerCase()]
+      : [target, base]
+    if (right === '/') return left.startsWith('/')
+    return left === right || left.startsWith(`${right}/`)
+  })
+}
+
+function normalizeRemotePath(path) {
+  const value = String(path || '/').replace(/\\/g, '/').replace(/\/+$/, '')
+  return value || '/'
 }
 
 function normalizeModelInput(input) {
