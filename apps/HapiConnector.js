@@ -470,20 +470,24 @@ export class HapiConnector extends plugin {
   }
 
   async createSession(e, machineId, directory, agent, createOptions) {
+    const flavor = String(agent || '').toLowerCase()
     const payload = {
       directory,
       agent,
       sessionType: createOptions.sessionType,
       yolo: createOptions.yolo,
     }
-    if (createOptions.effort) payload.modelReasoningEffort = createOptions.effort
+    if (createOptions.model && createOptions.model !== 'default') payload.model = createOptions.model
+    if (createOptions.effort && flavor === 'codex') payload.modelReasoningEffort = createOptions.effort
+    if (createOptions.effort && flavor === 'claude') payload.effort = createOptions.effort
     const [ok, msg, sid] = await ops.spawnSession(this.client, machineId, payload)
+    await this.reply(msg)
     if (ok && sid) {
       State.setCurrent(e, sid, agent)
       await this.refreshSessions()
       await this.applyCreateOptions(sid, agent, createOptions)
     }
-    return this.reply(msg)
+    return true
   }
 
   async selectMachineDirectory(e, machine) {
@@ -582,21 +586,10 @@ export class HapiConnector extends plugin {
   }
 
   async applyCreateOptions(sid, agent, options) {
-    const flavor = String(agent || '').toLowerCase()
-    const lines = []
-    if (options.model && ['claude', 'gemini'].includes(flavor)) {
-      const [, msg] = await ops.setModelMode(this.client, sid, options.model)
-      lines.push(msg)
-    }
-    if (options.permission) {
-      const [, msg] = await ops.setPermissionMode(this.client, sid, options.permission)
-      lines.push(msg)
-    }
-    if (options.effort && ['claude', 'codex'].includes(flavor)) {
-      const [, msg] = await ops.setEffort(this.client, sid, options.effort, agent)
-      lines.push(msg)
-    }
-    if (lines.length) await this.reply(lines.join('\n'))
+    if (!options.permission || ['default', 'yolo'].includes(options.permission)) return
+
+    const [ok, msg] = await retrySessionConfig(() => ops.setPermissionMode(this.client, sid, options.permission))
+    if (!ok || msg) await this.reply(msg)
   }
 
   async cmdSessionAction(e, arg, action) {
@@ -977,6 +970,24 @@ function splitLong(text, size = 3500) {
   const parts = []
   for (let i = 0; i < text.length; i += size) parts.push(text.slice(i, i + size))
   return parts
+}
+
+async function retrySessionConfig(action, attempts = 8) {
+  let last = [false, '']
+  for (let i = 0; i < attempts; i++) {
+    last = await action()
+    if (last[0] || !isSessionRpcPending(last[1])) return last
+    await sleep(1000)
+  }
+  return last
+}
+
+function isSessionRpcPending(msg = '') {
+  return /RPC handler not registered|set-session-config/i.test(String(msg))
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 function parseAttachmentRequest(text) {
