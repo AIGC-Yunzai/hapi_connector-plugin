@@ -195,19 +195,18 @@ export function helpText(topic = '') {
 }
 
 export function helpNodes(topic = '') {
-  const full = topic.trim() === '全部' || topic.trim().toLowerCase() === 'all'
   const common = [
     'HAPI Connector 常用命令',
     '',
-    '#hapi list [all]        查看 session',
+    '#hapi list [all]        查看[当前聊天/全部] session',
     '#hapi sw <序号|ID前缀>  切换当前 session',
     '#hapi s                 查看当前状态',
     '#hapi msg [条数]        查看最近消息',
     '#hapi to <序号> <内容>  发消息到指定 session',
     '> 内容                  快捷发到当前 session',
-    '>2 内容                 快捷发到第 2 个 session',
+    '>{2} 内容               快捷发到第 2 个 session',
     '> 上传附件3张 [内容]      等待附件后发到当前 session',
-    '> 2 上传附件5份 [内容]    等待附件后发到第 2 个 session',
+    '> {2} 上传附件5份 [内容]  等待附件后发到第 2 个 session',
     '#hapi pending           查看待审批',
     '#hapi a                 批准全部普通请求',
     '#hapi deny [序号]       拒绝请求',
@@ -215,10 +214,6 @@ export function helpNodes(topic = '') {
     '#hapi更新              更新插件',
     '#hapi强制更新          强制更新插件',
   ]
-  if (!full) {
-    common.push('', '更多：#hapi help 全部')
-    return [common.join('\n'), createExampleNode()]
-  }
   return [
     common.join('\n'),
     [

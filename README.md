@@ -88,7 +88,7 @@ access_token: "your-token"
 
 ```text
 > 继续刚才的任务
->2 帮我看一下报错
+>{2} 帮我看一下报错
 ```
 
 ## 常用命令
@@ -108,9 +108,9 @@ access_token: "your-token"
 ```text
 #hapi to <序号> <内容>      发送到指定 session
 > 内容                     快捷发送到当前 session
->N 内容                    快捷发送到第 N 个 session
+>{N} 内容                    快捷发送到第 N 个 session
 > 上传附件3张 [内容]         等待 3 个附件后发送到当前 session
-> N 上传附件5份 [内容]       等待 5 个附件后发送到第 N 个 session
+> {N} 上传附件5份 [内容]     等待 5 个附件后发送到第 N 个 session
 ```
 
 快捷发送、`#hapi to` 支持同一条消息附带图片/视频/文件等附件，插件会先上传附件到 HAPI，再把附件引用随消息发送。`> 上传附件3张` 会进入等待模式，按提示继续发送附件即可。
@@ -128,6 +128,8 @@ access_token: "your-token"
 #hapi delete [序号|ID前缀]                       删除 session
 #hapi clean [路径前缀] confirm                   清理 inactive sessions
 ```
+
+`#hapi create` 不带完整参数时会进入分步向导模式。
 
 `create` 的完整格式：
 

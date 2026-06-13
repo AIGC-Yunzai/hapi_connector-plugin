@@ -33,6 +33,13 @@ let sharedClient = null
 let sharedSse = null
 let booting = null
 
+const HAPI_RUNNER_HINT = [
+  '没有在线 machine。',
+  '请参考 README 安装教程，先在运行 HAPI 的控制台启动 Hapi runner，例如：',
+  'hapi runner start --workspace-root /你的项目目录',
+  '然后再执行 #hapi machines 或 #hapi create。',
+].join('\n')
+
 export class HapiConnector extends plugin {
   constructor() {
     super({
@@ -186,7 +193,7 @@ export class HapiConnector extends plugin {
         case 'read':
           return this.cmdRead(e, arg)
         default:
-          return this.reply([`未知命令：/hapi ${cmd}`, ...helpNodes()])
+          return this.reply([`未知命令：#hapi ${cmd}`, ...helpNodes()])
       }
     } catch (err) {
       logger.error('[hapi-connector] 命令执行失败', err)
@@ -205,8 +212,9 @@ export class HapiConnector extends plugin {
     if (!rest) return false
     const attachmentRequest = parseAttachmentRequest(rest)
     if (attachmentRequest) return this.quickSendAttachments(e, attachmentRequest)
+    if (/^\d+\s+[\s\S]+$/.test(rest)) return false
 
-    const match = rest.match(/^(\d+)\s+([\s\S]+)$/)
+    const match = rest.match(/^\{(\d+)\}\s+([\s\S]+)$/)
     if (match) {
       await this.refreshSessions()
       const session = sessionsCache[Number(match[1]) - 1]
@@ -219,7 +227,7 @@ export class HapiConnector extends plugin {
     }
 
     const sid = State.currentSid(e)
-    if (!sid) return this.reply('请先用 /hapi sw <序号> 选择一个 session')
+    if (!sid) return this.reply('请先用 #hapi sw <序号> 选择一个 session')
     const [uploadText, attachments] = await this.uploadMessageAttachments(e, sid)
     const [, reply] = await ops.sendMessage(this.client, sid, rest, attachments)
     logger.info(`[hapi-connector] quickSend 触发: ${State.formatWindowKey(State.windowKey(e))} -> ${sid.slice(0, 8)}`)
@@ -256,7 +264,7 @@ export class HapiConnector extends plugin {
     }
     const sid = State.currentSid(e)
     if (!sid) {
-      await this.reply('请先用 /hapi sw <序号> 选择一个 session')
+      await this.reply('请先用 #hapi sw <序号> 选择一个 session')
       return null
     }
     return { id: sid }
@@ -316,14 +324,14 @@ export class HapiConnector extends plugin {
 
   async cmdStatus(e) {
     const sid = State.currentSid(e)
-    if (!sid) return this.reply('请先用 /hapi sw <序号> 选择一个 session')
+    if (!sid) return this.reply('请先用 #hapi sw <序号> 选择一个 session')
     const detail = await ops.fetchSessionDetail(this.client, sid)
     return this.reply(formatSessionStatus(detail))
   }
 
   async cmdMessages(e, arg) {
     const sid = State.currentSid(e)
-    if (!sid) return this.reply('请先用 /hapi sw <序号> 选择一个 session')
+    if (!sid) return this.reply('请先用 #hapi sw <序号> 选择一个 session')
     const limit = Math.min(Math.max(Number(arg) || 10, 1), 100)
     const messages = await ops.fetchMessages(this.client, sid, limit)
     return this.reply(formatMessageNodes(messages))
@@ -331,7 +339,7 @@ export class HapiConnector extends plugin {
 
   async cmdTo(e, arg) {
     const parts = splitArgs(arg)
-    if (parts.length < 2) return this.reply('用法：/hapi to <序号> <内容>')
+    if (parts.length < 2) return this.reply('用法：#hapi to <序号> <内容>')
     await this.refreshSessions()
     const session = this.resolveSession(parts[0])
     if (!session) return this.reply(`未找到 session：${parts[0]}`)
@@ -360,7 +368,7 @@ export class HapiConnector extends plugin {
   async cmdAllow(e, arg) {
     const item = this.findPending(arg)
     if (!item) return this.reply('未找到待审批请求')
-    if (isQuestionRequest(item.req)) return this.reply('这是 question 请求，请用 /hapi answer <序号> <答案>')
+    if (isQuestionRequest(item.req)) return this.reply('这是 question 请求，请用 #hapi answer <序号> <答案>')
     const [, msg] = await ops.approvePermission(this.client, item.sid, item.rid)
     return this.reply(msg)
   }
@@ -370,7 +378,7 @@ export class HapiConnector extends plugin {
     const item = this.findPending(parts[0])
     if (!item) return this.reply('未找到待回答请求')
     const answer = parts.slice(1).join(' ')
-    if (!answer) return this.reply('用法：/hapi answer <序号> <答案或选项>')
+    if (!answer) return this.reply('用法：#hapi answer <序号> <答案或选项>')
     const answers = { 0: [answer] }
     const [, msg] = await ops.approvePermission(this.client, item.sid, item.rid, answers)
     return this.reply(msg)
@@ -389,22 +397,83 @@ export class HapiConnector extends plugin {
 
   async cmdMachines() {
     const machines = await ops.fetchMachines(this.client)
-    if (!machines.length) return this.reply('没有在线 machine')
-    return this.reply(machines.map((m, i) => `[${i + 1}] ${m.id || m.machineId || m.name}\n${m.name || ''}`).join('\n\n'))
+    if (!machines.length) return this.reply(HAPI_RUNNER_HINT)
+    return this.reply(formatMachineChoices(machines))
   }
 
   async cmdCreate(e, arg) {
     const parts = splitArgs(arg)
-    if (parts.length < 3) {
-      return this.reply([
-        '用法：/hapi create <machineId> <目录> <agent> [simple|worktree] [模型] [推理强度] [权限模式] [yolo]',
-        '示例：/hapi create my-pc E:/myrepo/project codex simple yolo high',
-        '示例：/hapi create my-pc E:/myrepo/project claude simple opus high bypassPermissions',
-        '先用 /hapi machines 查看在线 machine',
-      ].join('\n'))
-    }
+    if (parts.length < 3) return this.cmdCreateWizard(e, parts)
     const [machineId, directory, agent, sessionType = 'simple', yolo = '', reasoning = ''] = parts
     const createOptions = parseCreateOptions(agent, [sessionType, yolo, reasoning, ...parts.slice(6)])
+    return this.createSession(e, machineId, directory, agent, createOptions)
+  }
+
+  async cmdCreateWizard(e, parts = []) {
+    const machines = await ops.fetchMachines(this.client)
+    if (!machines.length) return this.reply(HAPI_RUNNER_HINT)
+
+    let machineInput = parts[0] || await this.awaitSettingArg(e, [
+      '请选择用于创建 session 的 machine，发送序号或 machineId：',
+      '',
+      formatMachineChoices(machines),
+    ].join('\n'))
+    if (!machineInput) return true
+
+    let machine = resolveMachineChoice(machineInput, machines)
+    while (!machine) {
+      await this.reply(`无效 machine：${machineInput}\n请发送序号或 machineId，发送“取消”退出`)
+      machineInput = await this.awaitSettingArg(e, formatMachineChoices(machines))
+      if (!machineInput) return true
+      machine = resolveMachineChoice(machineInput, machines)
+    }
+
+    const directory = parts[1] || await this.awaitSettingArg(e, '请输入远端工作目录，例如：/root/TRSS-Yunzai 或 E:/myrepo/project')
+    if (!directory) return true
+
+    const agents = ['claude', 'codex', 'gemini', 'opencode']
+    const agent = await this.awaitChoiceArg(e, '请选择 agent：\n1. claude\n2. codex\n3. gemini\n4. opencode', agents, parts[2])
+    if (!agent) return true
+
+    const sessionType = await this.awaitChoiceArg(e, '请选择 session 类型：\n1. simple\n2. worktree', ['simple', 'worktree'], parts[3], 'simple')
+    if (!sessionType) return true
+
+    const flavor = agent.toLowerCase()
+    const createOptions = {
+      sessionType,
+      yolo: false,
+      model: '',
+      effort: '',
+      permission: '',
+    }
+
+    const modelModes = flavor === 'gemini' ? GEMINI_MODEL_MODES : flavor === 'claude' ? MODEL_MODES : []
+    if (modelModes.length) {
+      const model = await this.awaitChoiceArg(e, `请选择模型，发送“跳过”使用默认：\n${modelModes.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`, modelModes, '', '')
+      if (model === null) return true
+      createOptions.model = model
+    }
+
+    const efforts = flavor === 'codex' ? CODEX_EFFORTS : flavor === 'claude' ? CLAUDE_EFFORTS : []
+    if (efforts.length) {
+      const labels = efforts.map(item => item || (flavor === 'codex' ? 'inherit' : 'auto'))
+      const effort = await this.awaitChoiceArg(e, `请选择推理强度，发送“跳过”使用默认：\n${labels.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`, labels, '', '')
+      if (effort === null) return true
+      createOptions.effort = ['inherit', 'auto', 'default'].includes(effort) ? '' : effort
+    }
+
+    const permissionModes = PERMISSION_MODES[flavor] || []
+    if (permissionModes.length) {
+      const permission = await this.awaitChoiceArg(e, `请选择权限模式，发送“跳过”使用默认：\n${permissionModes.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`, permissionModes, '', '')
+      if (permission === null) return true
+      createOptions.permission = permission
+      if (permission === 'yolo') createOptions.yolo = true
+    }
+
+    return this.createSession(e, machineIdOf(machine), directory, agent, createOptions)
+  }
+
+  async createSession(e, machineId, directory, agent, createOptions) {
     const payload = {
       directory,
       agent,
@@ -419,6 +488,18 @@ export class HapiConnector extends plugin {
       await this.applyCreateOptions(sid, agent, createOptions)
     }
     return this.reply(msg)
+  }
+
+  async awaitChoiceArg(e, prompt, values, initial = '', fallback = null) {
+    while (true) {
+      const input = String(initial || '').trim() || await this.awaitSettingArg(e, prompt)
+      initial = ''
+      if (!input) return null
+      if (fallback !== null && isSkipText(input)) return fallback
+      const target = resolveChoice(input, values, { model: true })
+      if (values.includes(target)) return target
+      await this.reply(`无效输入：${input}\n可用: ${values.join(', ')}${fallback !== null ? '\n发送“跳过”使用默认值。' : ''}`)
+    }
   }
 
   async applyCreateOptions(sid, agent, options) {
@@ -476,7 +557,7 @@ export class HapiConnector extends plugin {
     const sid = State.currentSid(e)
     if (!sid) return this.reply('请先选择 session')
     const name = arg.trim()
-    if (!name) return this.reply('用法：/hapi rename <新标题>')
+    if (!name) return this.reply('用法：#hapi rename <新标题>')
     const [, msg] = await ops.renameSession(this.client, sid, name)
     await this.refreshSessions()
     return this.reply(msg)
@@ -498,7 +579,7 @@ export class HapiConnector extends plugin {
         `将清理 ${targets.length} 个 inactive session:`,
         formatSessionList(targets, '', sessionsCache),
         '',
-        `确认执行请发送：/hapi clean${pathFilter ? ` ${pathFilter}` : ''} confirm`,
+        `确认执行请发送：#hapi clean${pathFilter ? ` ${pathFilter}` : ''} confirm`,
       ].join('\n'))
     }
 
@@ -632,7 +713,7 @@ export class HapiConnector extends plugin {
       return this.reply('已清空当前窗口的 session 绑定和窗口状态')
     }
     if (action === 'status') return this.cmdRoutes(e)
-    return this.reply('用法：/hapi bind [claude|codex|gemini|opencode|status|reset]')
+    return this.reply('用法：#hapi bind [claude|codex|gemini|opencode|status|reset]')
   }
 
   async cmdRoutes() {
@@ -658,7 +739,7 @@ export class HapiConnector extends plugin {
   async cmdFind(e, arg) {
     const sid = State.currentSid(e)
     if (!sid) return this.reply('请先选择 session')
-    if (!arg) return this.reply('用法：/hapi find <关键词>')
+    if (!arg) return this.reply('用法：#hapi find <关键词>')
     const files = await ops.listFiles(this.client, sid, arg)
     return this.reply(formatFiles(files, arg))
   }
@@ -666,7 +747,7 @@ export class HapiConnector extends plugin {
   async cmdRead(e, arg) {
     const sid = State.currentSid(e)
     if (!sid) return this.reply('请先选择 session')
-    if (!arg) return this.reply('用法：/hapi read <远端文件路径>')
+    if (!arg) return this.reply('用法：#hapi read <远端文件路径>')
     const [ok, content] = await ops.readFile(this.client, sid, arg)
     if (!ok) return this.reply(content)
     const decoded = Buffer.from(content, 'base64').toString('utf8')
@@ -677,7 +758,7 @@ export class HapiConnector extends plugin {
     const sid = State.currentSid(e)
     if (!sid) return this.reply('请先选择 session')
     const remotePath = arg.trim()
-    if (!remotePath) return this.reply('用法：/hapi download <远端文件路径>')
+    if (!remotePath) return this.reply('用法：#hapi download <远端文件路径>')
     const size = await getRemoteFileSize(this.client, sid, remotePath)
     if (size > 10 * 1024 * 1024) return this.reply(`文件过大 (${(size / 1024 / 1024).toFixed(1)} MB)，超过 10 MB 限制`)
 
@@ -723,7 +804,7 @@ export class HapiConnector extends plugin {
     }
 
     const sources = await extractUploadSources(e)
-    if (!sources.length) return this.reply('请在同一条消息里附带图片或文件：/hapi upload [附件]')
+    if (!sources.length) return this.reply('请在同一条消息里附带图片或文件：#hapi upload [附件]')
     const lines = []
     const attachments = []
     for (const source of sources) {
@@ -825,7 +906,7 @@ function splitLong(text, size = 3500) {
 }
 
 function parseAttachmentRequest(text) {
-  const match = String(text || '').match(/^(?:(\d+)\s+)?上传附件\s*(\d+)?\s*(?:张|份|个|件|条|段|则)?(?:\s+([\s\S]+))?$/)
+  const match = String(text || '').match(/^(?:\{(\d+)\}\s*)?上传附件\s*(\d+)?\s*(?:张|份|个|件|条|段|则)?(?:\s+([\s\S]+))?$/)
   if (!match) return null
   const count = Math.min(Math.max(Number(match[2]) || 1, 1), 20)
   return {
@@ -839,11 +920,33 @@ function isCancelText(text) {
   return ['0', '取消', '退出', 'cancel', 'q'].includes(String(text || '').trim().toLowerCase())
 }
 
+function isSkipText(text) {
+  return ['跳过', '默认', 'default', 'skip', 'none', '无'].includes(String(text || '').trim().toLowerCase())
+}
+
 function resolveChoice(input, values, options = {}) {
   const raw = String(input || '').trim()
   if (/^\d+$/.test(raw)) return values[Number(raw) - 1]
   const normalized = options.model ? normalizeModelInput(raw) : raw
   return values.find(item => item.toLowerCase() === normalized.toLowerCase()) ?? normalized
+}
+
+function formatMachineChoices(machines) {
+  return machines.map((machine, idx) => {
+    const id = machineIdOf(machine)
+    const name = machine.name && machine.name !== id ? `\n${machine.name}` : ''
+    return `[${idx + 1}] ${id}${name}`
+  }).join('\n\n')
+}
+
+function resolveMachineChoice(input, machines) {
+  const raw = String(input || '').trim()
+  if (/^\d+$/.test(raw)) return machines[Number(raw) - 1] || null
+  return machines.find(machine => machineIdOf(machine).toLowerCase() === raw.toLowerCase()) || null
+}
+
+function machineIdOf(machine) {
+  return String(machine?.id || machine?.machineId || machine?.name || '')
 }
 
 function normalizeModelInput(input) {
