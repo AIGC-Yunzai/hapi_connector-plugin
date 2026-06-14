@@ -1,3 +1,5 @@
+import Config from '../components/Config.js'
+
 const DIRECT_REPLY_LIMIT = 300
 const MESSAGE_LIMIT = 7000
 const SAFE_NODE_LIMIT = 6800
@@ -6,6 +8,12 @@ export async function smartReply(e, msg = '', quote = false, data = {}) {
   if (!e?.reply || msg === undefined || msg === null || msg === '') return false
 
   if (Array.isArray(msg) && msg.every(item => typeof item === 'string')) {
+    // 部分适配器（如微信 OC）不支持合并转发，会降级为每个节点单独发送，
+    // 且一个回复周期内消息条数有限。开启后把分节点合并成单节点，
+    // 仅在超过单节点字数上限时才自动拆分，显著减少消息条数。
+    if (Config.getConfig?.()?.merge_forward_single_node) {
+      return replyForward(e, splitTextToNodes(msg.filter(Boolean).join('\n\n')), data)
+    }
     return replyForward(e, msg, data)
   }
 

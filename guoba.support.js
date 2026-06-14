@@ -106,6 +106,12 @@ export function supportGuoba() {
           bottomHelpMessage: '开启后，推送 AI 回复（SSE 推送与 #hapi msg）时额外渲染一张 markdown 图片一起发出',
         },
         {
+          field: 'merge_forward_single_node',
+          label: '合并为单节点转发',
+          component: 'Switch',
+          bottomHelpMessage: '开启后，多条消息合并为单个节点的合并转发（仍按字数上限约 6800 自动分隔）。用于微信 OC 等不支持合并转发、会降级为逐条发送且单周期消息条数有限的适配器',
+        },
+        {
           component: 'Divider',
           label: '审批设置',
           componentProps: { orientation: 'left', plain: true },
