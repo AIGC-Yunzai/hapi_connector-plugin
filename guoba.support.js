@@ -194,8 +194,9 @@ export function supportGuoba() {
         },
         {
           field: 'remind_interval',
-          label: '提醒间隔秒',
+          label: '重复提醒间隔',
           component: 'InputNumber',
+          helpMessage: '单位：秒',
           componentProps: { min: 30, step: 10 },
         },
         {

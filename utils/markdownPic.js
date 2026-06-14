@@ -1,6 +1,10 @@
 import puppeteer from '../../../lib/puppeteer/puppeteer.js'
+import fs from 'node:fs'
+import path from 'node:path'
 
 const _path = process.cwd()
+const GIRL_IMAGE_DIR = path.join(_path, 'plugins', 'hapi_connector-plugin', 'resources', 'readme')
+const GIRL_IMAGE_PATTERN = /^girl(?:\d+)?\.webp$/i
 
 /**
  * 把节点数组（形如 `role #seq\n正文`）转换为带分隔线的 markdown 文本
@@ -46,10 +50,23 @@ export async function renderMarkdownImage(content) {
       _path,
       tplFile: './plugins/hapi_connector-plugin/resources/markdownPic/index.html',
       content: String(content),
+      girlImage: pickGirlImage(),
     })
     return img || false
   } catch (err) {
     logger.warn(`[hapi-connector] 生成 markdown 图片失败: ${err?.message || err}`)
     return false
+  }
+}
+
+function pickGirlImage() {
+  try {
+    const files = fs.readdirSync(GIRL_IMAGE_DIR)
+      .filter(name => GIRL_IMAGE_PATTERN.test(name))
+      .sort()
+    const picked = files[Math.floor(Math.random() * files.length)] || 'girl.webp'
+    return `${_path}/plugins/hapi_connector-plugin/resources/readme/${picked}`
+  } catch {
+    return `${_path}/plugins/hapi_connector-plugin/resources/readme/girl.webp`
   }
 }

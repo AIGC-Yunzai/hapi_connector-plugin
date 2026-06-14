@@ -86,7 +86,7 @@ export class SseListener {
           this.hibernated = true
           this.running = false
           logger.mark(`[hapi-connector] SSE 连续失败 ${this.connFailCount} 次，已进入休眠`)
-          await this.notify(`SSE 已连续失败 ${this.connFailCount} 次，已进入休眠。\n发送 /hapi list 可重新唤醒。`, '')
+          await this.notify(`SSE 已连续失败 ${this.connFailCount} 次，已进入休眠。\n发送 #hapi list 可重新唤醒。`, '')
           return
         }
         await new Promise(resolve => setTimeout(resolve, backoff))
@@ -134,8 +134,6 @@ export class SseListener {
       lastSeq: oldSeq,
     }
 
-    // session-updated 事件是增量推送：只有携带 agentState 的事件才反映完整的待审批集合。
-    // 思考状态等局部更新不带 agentState，若按空集合处理会误删待审批请求，导致 /hapi answer 找不到。
     if (data.agentState) {
       await this.handleRequests(sid, data.agentState.requests || {})
     }
@@ -194,9 +192,7 @@ export class SseListener {
         continue
       }
       const total = Object.values(this.pending).reduce((sum, item) => sum + Object.keys(item).length, 0)
-      // 拆成多个合并转发节点（每个选项一个节点，附可复制的 /hapi answer），方便复制；
-      // 始终走文字/转发，不受「仅图片」输出方式影响
-      await this.notify(formatRequestNodes(sid, req, total, this.sessions), sid)
+      await this.notify(formatRequestNodes(sid, req, total, this.sessions, this.config), sid)
     }
   }
 

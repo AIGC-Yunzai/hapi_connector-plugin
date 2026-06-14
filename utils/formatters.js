@@ -200,19 +200,21 @@ function formatRequestFull(req) {
 
 /**
  * 把一个待审批/问题请求拆成多个「合并转发」节点，方便复制指令。
- * - 问题请求(AskUserQuestion)：标题节点 + 每个选项一个节点(选项/说明/可直接复制的 /hapi answer) + 末尾指令节点
+ * - 问题请求(AskUserQuestion)：标题节点 + 每个选项一个节点(选项/说明/可直接复制的 #hapi answer) + 末尾指令节点
  * - 普通权限请求：标题节点 + 完整详情节点 + 末尾指令节点
  * @returns {string[]} 节点字符串数组
  */
-export function formatRequestNodes(sid, req, total, sessions) {
+export function formatRequestNodes(sid, req, total, sessions, config = {}) {
   const label = sessionLabel(sid, sessions)
   const question = isQuestionRequest(req)
-  const cmdNode = [
+  const cmdLines = [
     `当前共 ${total} 个待审批`,
-    question ? `/hapi answer ${req.index} <答案>` : `/hapi allow ${req.index}`,
-    '/hapi a 批准全部普通请求',
-    '/hapi deny 拒绝',
-  ].join('\n')
+    question ? `#hapi answer ${req.index} <答案>` : `#hapi allow ${req.index}`,
+    '#hapi a 批准全部普通请求',
+    '#hapi deny 拒绝',
+  ]
+  if (config.enable_poke_approve) cmdLines.push('“戳一戳我”批准全部普通请求')
+  const cmdNode = cmdLines.join('\n')
 
   if (question) {
     const questions = parseQuestions(req)
@@ -225,7 +227,7 @@ export function formatRequestNodes(sid, req, total, sessions) {
           if (!opt?.label) continue
           const parts = [opt.label]
           if (opt.description) parts.push(opt.description)
-          parts.push(`/hapi answer ${req.index} ${opt.label}`)
+          parts.push(`#hapi answer ${req.index} ${opt.label}`)
           nodes.push(parts.join('\n'))
         }
       }
