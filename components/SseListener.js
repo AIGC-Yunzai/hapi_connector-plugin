@@ -224,7 +224,10 @@ export class SseListener {
         const outs = await buildMarkdownOutputs(this.config?.markdown_output, payload, nodesToMarkdown(payload))
         for (const out of outs) await this.notify(out, sid)
       }
-      await this.notify(`会话已完成，等待新的输入\n${sessionLabel(sid, this.sessions)}`, sid)
+      // 仅图片模式下不发「会话已完成」文字，避免图片后又跟一句纯文字提示
+      if (this.config?.markdown_output !== 'image') {
+        await this.notify(`会话已完成，等待新的输入\n${sessionLabel(sid, this.sessions)}`, sid)
+      }
     } catch (err) {
       logger.debug(`[hapi-connector] 拉取会话消息失败: ${err.message || err}`)
     }
