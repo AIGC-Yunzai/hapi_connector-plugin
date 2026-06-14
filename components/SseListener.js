@@ -5,6 +5,7 @@ import {
   isQuestionRequest,
   sessionLabel,
 } from '../utils/formatters.js'
+import { renderMarkdownImage, nodesToMarkdown } from '../utils/markdownPic.js'
 
 export class SseListener {
   constructor(client, sessions, notify) {
@@ -231,6 +232,10 @@ export class SseListener {
       const picked = this.config?.output_level === 'summary' ? visible.slice(-count) : visible
       if (picked.length) {
         await this.notify([sessionLabel(sid, this.sessions), ...picked], sid)
+        if (this.config?.markdown_image) {
+          const img = await renderMarkdownImage(nodesToMarkdown([sessionLabel(sid, this.sessions), ...picked]))
+          if (img) await this.notify(img, sid)
+        }
       }
       await this.notify(`会话已完成，等待新的输入\n${sessionLabel(sid, this.sessions)}`, sid)
     } catch (err) {

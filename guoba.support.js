@@ -100,6 +100,12 @@ export function supportGuoba() {
           },
         },
         {
+          field: 'markdown_image',
+          label: '同时输出 Markdown 图片',
+          component: 'Switch',
+          bottomHelpMessage: '开启后，推送 AI 回复（SSE 推送与 #hapi msg）时额外渲染一张 markdown 图片一起发出',
+        },
+        {
           component: 'Divider',
           label: '审批设置',
           componentProps: { orientation: 'left', plain: true },

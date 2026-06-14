@@ -21,6 +21,9 @@ refresh_before_expiry: 180
 output_level: "simple"
 summary_msg_count: 5
 
+# 推送 AI 回复时是否同时输出一张 markdown 图片（SSE 推送与 #hapi msg）
+markdown_image: false
+
 # 是否启用快捷发送
 quick_send_enabled: true
 

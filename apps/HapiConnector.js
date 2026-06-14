@@ -13,6 +13,7 @@ import {
   uploadFile,
 } from '../components/FileOps.js'
 import { smartReply } from '../utils/reply.js'
+import { renderMarkdownImage, nodesToMarkdown } from '../utils/markdownPic.js'
 import {
   CLAUDE_EFFORTS,
   CODEX_EFFORTS,
@@ -366,7 +367,13 @@ export class HapiConnector extends plugin {
     if (!sid) return this.reply('请先用 #hapi sw <序号> 选择一个 session')
     const limit = Math.min(Math.max(Number(arg) || 10, 1), 100)
     const messages = await ops.fetchMessages(this.client, sid, limit)
-    return this.reply(formatMessageNodes(messages))
+    const nodes = formatMessageNodes(messages)
+    await this.reply(nodes)
+    if (this.config?.markdown_image) {
+      const img = await renderMarkdownImage(nodesToMarkdown(nodes))
+      if (img) await this.reply(img)
+    }
+    return
   }
 
   async cmdTo(e, arg) {
