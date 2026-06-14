@@ -8,16 +8,20 @@ export function supportGuoba() {
     label,
     componentProps: { orientation: 'left', plain: true },
   })
-  const helpItem = (key, title, command) => ({
-    field: `help_${key}`,
-    label: title,
-    component: 'Input',
-    componentProps: { readonly: true, defaultValue: command },
-  })
+  const helpItem = (key, title, command, bottomHelpMessage = '') => {
+    const schema = {
+      field: `help_${key}`,
+      label: title,
+      component: 'Input',
+      componentProps: { readonly: true, defaultValue: command },
+    }
+    if (bottomHelpMessage) schema.bottomHelpMessage = bottomHelpMessage
+    return schema
+  }
   const helpSchemas = [
     helpDivider('会话与对话'),
-    helpItem('list', '查看 session 列表（当前聊天 / 全部）', '#hapi list [all]'),
-    helpItem('sw', '切换当前 session', '#hapi sw <序号|ID前缀>'),
+    helpItem('list', '查看 session 列表（当前聊天 / 全部）', '#hapi list [all]', '切换到某 session 后，将同步 HAPI 消息发送到当前群/私聊'),
+    helpItem('sw', '切换当前 session', '#hapi sw <序号|ID前缀>', '切换到该 session 后，将同步 HAPI 消息发送到当前群/私聊'),
     helpItem('s', '查看当前 session 状态', '#hapi s'),
     helpItem('msg', '查看最近消息', '#hapi msg [条数]'),
     helpItem('chat', '发消息到当前 session', '#hapi chat <内容>'),

@@ -24,8 +24,15 @@ _把 Claude Code / Codex / Gemini / OpenCode 会话搬进聊天窗口。_
 ### 预览
 
 - 示例中连接的是 Claude Code
+
 <img width="350" alt="image" src="https://github.com/user-attachments/assets/f01e4ca9-176d-4812-8177-3d63623d13d7" />
+
 <img width="350" alt="image" src="https://github.com/user-attachments/assets/8dfaf13d-d1a4-40c9-9d2b-91abaa071f1c" />
+
+- 支持 Markdown 图片回复
+
+<img width="350" alt="c2eabac3d8c4033bd63028e7d2bf9671" src="https://github.com/user-attachments/assets/130bf2fd-e116-4b89-aaa4-884dad5bf21c" />
+
 
 ## 安装插件
 
