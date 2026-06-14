@@ -20,10 +20,25 @@ export function nodesToMarkdown(nodes) {
 }
 
 /**
- * 将 markdown 文本渲染为图片（segment.image），失败返回 false
- * @param {string} content markdown 文本
- * @returns {Promise<object|false>}
+ * 根据输出方式返回应依次发送的内容数组
+ * @param {string} mode 'text' 仅文字 / 'image' 仅图片 / 'both' 图片+文字（默认 text）
+ * @param {*} textPayload 文字内容（字符串或节点数组）
+ * @param {string} markdownContent 用于渲染图片的 markdown 文本
+ * @returns {Promise<Array>} 待发送内容序列（文字在前、图片在后）
  */
+export async function buildMarkdownOutputs(mode, textPayload, markdownContent) {
+  const m = mode || 'text'
+  const wantImage = m === 'image' || m === 'both'
+  const wantText = m === 'text' || m === 'both'
+  let img = null
+  if (wantImage) img = await renderMarkdownImage(markdownContent)
+  const outs = []
+  // 仅图片模式渲染失败时回退为文字，避免什么都收不到
+  if (wantText || !img) outs.push(textPayload)
+  if (img) outs.push(img)
+  return outs
+}
+
 export async function renderMarkdownImage(content) {
   if (!content || !String(content).trim()) return false
   try {

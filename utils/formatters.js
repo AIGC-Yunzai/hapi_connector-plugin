@@ -177,6 +177,69 @@ export function formatRequestDetail(req) {
   return text && text !== '{}' ? `${req.tool}: ${text.slice(0, 150)}` : req.tool || '?'
 }
 
+// 兼容 arguments 为对象或 JSON 字符串，取出 AskUserQuestion 的 questions 数组
+function parseQuestions(req) {
+  let args = req?.arguments
+  if (typeof args === 'string') {
+    try { args = JSON.parse(args) } catch { return [] }
+  }
+  return Array.isArray(args?.questions) ? args.questions : []
+}
+
+// 权限请求的完整详情（不像 formatRequestDetail 截断到 150，转发节点里可放更多）
+function formatRequestFull(req) {
+  if (req.tool === '__compact__') return '压缩上下文 (/compact)'
+  const args = req.arguments || {}
+  let body = ''
+  if (typeof args === 'string') body = args
+  else if (args.command) body = String(args.command)
+  else body = JSON.stringify(args, null, 2)
+  if (!body || body === '{}') return req.tool || '?'
+  return `${req.tool}:\n${body.slice(0, 1500)}`
+}
+
+/**
+ * 把一个待审批/问题请求拆成多个「合并转发」节点，方便复制指令。
+ * - 问题请求(AskUserQuestion)：标题节点 + 每个选项一个节点(选项/说明/可直接复制的 /hapi answer) + 末尾指令节点
+ * - 普通权限请求：标题节点 + 完整详情节点 + 末尾指令节点
+ * @returns {string[]} 节点字符串数组
+ */
+export function formatRequestNodes(sid, req, total, sessions) {
+  const label = sessionLabel(sid, sessions)
+  const question = isQuestionRequest(req)
+  const cmdNode = [
+    `当前共 ${total} 个待审批`,
+    question ? `/hapi answer ${req.index} <答案>` : `/hapi allow ${req.index}`,
+    '/hapi a 批准全部普通请求',
+    '/hapi deny 拒绝',
+  ].join('\n')
+
+  if (question) {
+    const questions = parseQuestions(req)
+    const nodes = [`问题请求 #${req.index}\n${label}`]
+    if (questions.length) {
+      for (const q of questions) {
+        const head = [q.header, q.question].filter(Boolean).join('\n')
+        if (head) nodes.push(head)
+        for (const opt of (Array.isArray(q.options) ? q.options : [])) {
+          if (!opt?.label) continue
+          const parts = [opt.label]
+          if (opt.description) parts.push(opt.description)
+          parts.push(`/hapi answer ${req.index} ${opt.label}`)
+          nodes.push(parts.join('\n'))
+        }
+      }
+    } else {
+      nodes.push(formatRequestDetail(req))
+    }
+    nodes.push(cmdNode)
+    return nodes
+  }
+
+  return [`权限请求 #${req.index}\n${label}`, formatRequestFull(req), cmdNode]
+}
+
+
 export function formatPending(pending, sessions) {
   const items = []
   for (const [sid, reqs] of Object.entries(pending)) {

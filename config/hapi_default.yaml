@@ -21,8 +21,8 @@ refresh_before_expiry: 180
 output_level: "simple"
 summary_msg_count: 5
 
-# 推送 AI 回复时是否同时输出一张 markdown 图片（SSE 推送与 #hapi msg）
-markdown_image: false
+# 推送 AI 回复的输出方式：text 仅文字 / image 仅图片 / both 图片+文字
+markdown_output: "text"
 
 # 是否将分节点合并转发合并为单节点转发（仍按字数上限自动分隔）
 # 用于微信 OC 等不支持合并转发、会降级逐条发送且单周期消息条数有限的适配器
@@ -40,6 +40,7 @@ quick_group_at_bot_only: false
 # 待审批提醒与忙时托管审批
 remind_pending: true
 remind_interval: 180
+remind_max_count: 3
 enable_poke_approve: true
 auto_approve_enabled: false
 auto_approve_start: "23:00"

@@ -163,10 +163,17 @@ export function supportGuoba() {
           },
         },
         {
-          field: 'markdown_image',
-          label: '同时输出 Markdown 图片',
-          component: 'Switch',
-          bottomHelpMessage: '开启后，推送 AI 回复（SSE 推送与 #hapi msg）时额外渲染一张 markdown 图片一起发出',
+          field: 'markdown_output',
+          label: '输出方式',
+          component: 'Select',
+          componentProps: {
+            options: [
+              { label: '仅文字', value: 'text' },
+              { label: '仅图片', value: 'image' },
+              { label: '图片 + 文字', value: 'both' },
+            ],
+          },
+          bottomHelpMessage: '推送 AI 回复（SSE 推送与 #hapi msg）的输出方式：仅文字 / 仅 Markdown 图片 / 两者都发。「仅图片」渲染失败时会自动回退为文字',
         },
         {
           field: 'merge_forward_single_node',
@@ -190,6 +197,13 @@ export function supportGuoba() {
           label: '提醒间隔秒',
           component: 'InputNumber',
           componentProps: { min: 30, step: 10 },
+        },
+        {
+          field: 'remind_max_count',
+          label: '最大提醒次数',
+          component: 'InputNumber',
+          componentProps: { min: 1, step: 1 },
+          bottomHelpMessage: '同一个待审批最多提醒的次数，默认 3',
         },
         {
           field: 'enable_poke_approve',

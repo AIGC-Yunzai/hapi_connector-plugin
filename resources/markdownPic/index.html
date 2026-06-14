@@ -7,6 +7,8 @@
     <script src="{{_path}}/plugins/hapi_connector-plugin/resources/markdownPic/marked.min.js"></script>
     <link rel="stylesheet" href="{{_path}}/plugins/hapi_connector-plugin/resources/markdownPic/github.min.css">
     <script src="{{_path}}/plugins/hapi_connector-plugin/resources/markdownPic/highlight.min.js"></script>
+    <link rel="stylesheet" href="{{_path}}/plugins/hapi_connector-plugin/resources/markdownPic/katex/katex.min.css">
+    <script src="{{_path}}/plugins/hapi_connector-plugin/resources/markdownPic/katex/katex.min.js"></script>
     <style>
         body {
             margin: 0;
@@ -26,7 +28,7 @@
             z-index: 1;
             background: rgba(255, 255, 255, 0.97);
             border-radius: 16px;
-            padding: 26px 32px 20px;
+            padding: 26px 32px 118px;
             box-shadow: 0 6px 24px rgba(47, 133, 90, 0.12);
             border-top: 4px solid #2f855a;
             word-wrap: break-word;
@@ -217,6 +219,37 @@
             smartypants: false,
             xhtml: false
         });
+
+        // KaTeX 数学公式：用 marked 扩展在解析阶段直接渲染，
+        // 避免 marked 把 $...$ 内的 _ * \ 当成 markdown 语法破坏公式
+        const renderMath = (text, displayMode) => {
+            try {
+                return katex.renderToString(text, { throwOnError: false, displayMode });
+            } catch (e) {
+                return displayMode ? `$$${text}$$` : `$${text}$`;
+            }
+        };
+        const mathBlock = {
+            name: 'mathBlock',
+            level: 'block',
+            start(src) { return src.indexOf('$$'); },
+            tokenizer(src) {
+                const m = /^\$\$([\s\S]+?)\$\$/.exec(src);
+                if (m) return { type: 'mathBlock', raw: m[0], text: m[1].trim() };
+            },
+            renderer(token) { return renderMath(token.text, true); }
+        };
+        const mathInline = {
+            name: 'mathInline',
+            level: 'inline',
+            start(src) { return src.indexOf('$'); },
+            tokenizer(src) {
+                const m = /^\$([^$\n]+?)\$/.exec(src);
+                if (m) return { type: 'mathInline', raw: m[0], text: m[1].trim() };
+            },
+            renderer(token) { return renderMath(token.text, false); }
+        };
+        marked.use({ extensions: [mathBlock, mathInline] });
 
         document.querySelectorAll('.markdown-content').forEach(element => {
             element.innerHTML = marked.parse(element.textContent);

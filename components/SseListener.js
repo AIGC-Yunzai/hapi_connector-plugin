@@ -2,10 +2,11 @@ import * as ops from './SessionOps.js'
 import {
   extractTextPreview,
   formatRequestDetail,
+  formatRequestNodes,
   isQuestionRequest,
   sessionLabel,
 } from '../utils/formatters.js'
-import { renderMarkdownImage, nodesToMarkdown } from '../utils/markdownPic.js'
+import { buildMarkdownOutputs, nodesToMarkdown } from '../utils/markdownPic.js'
 
 export class SseListener {
   constructor(client, sessions, notify) {
@@ -193,17 +194,9 @@ export class SseListener {
         continue
       }
       const total = Object.values(this.pending).reduce((sum, item) => sum + Object.keys(item).length, 0)
-      const lines = [
-        `${isQuestionRequest(req) ? '问题请求' : '权限请求'} #${req.index}`,
-        sessionLabel(sid, this.sessions),
-        formatRequestDetail(req),
-        '',
-        `当前共 ${total} 个待审批`,
-        isQuestionRequest(req) ? `/hapi answer ${req.index} <答案>` : `/hapi allow ${req.index}`,
-        '/hapi a 批准全部普通请求',
-        '/hapi deny 拒绝',
-      ]
-      await this.notify(lines.join('\n'), sid)
+      // 拆成多个合并转发节点（每个选项一个节点，附可复制的 /hapi answer），方便复制；
+      // 始终走文字/转发，不受「仅图片」输出方式影响
+      await this.notify(formatRequestNodes(sid, req, total, this.sessions), sid)
     }
   }
 
@@ -231,11 +224,9 @@ export class SseListener {
       const count = Number(this.config?.summary_msg_count || 5)
       const picked = this.config?.output_level === 'summary' ? visible.slice(-count) : visible
       if (picked.length) {
-        await this.notify([sessionLabel(sid, this.sessions), ...picked], sid)
-        if (this.config?.markdown_image) {
-          const img = await renderMarkdownImage(nodesToMarkdown([sessionLabel(sid, this.sessions), ...picked]))
-          if (img) await this.notify(img, sid)
-        }
+        const payload = [sessionLabel(sid, this.sessions), ...picked]
+        const outs = await buildMarkdownOutputs(this.config?.markdown_output, payload, nodesToMarkdown(payload))
+        for (const out of outs) await this.notify(out, sid)
       }
       await this.notify(`会话已完成，等待新的输入\n${sessionLabel(sid, this.sessions)}`, sid)
     } catch (err) {
