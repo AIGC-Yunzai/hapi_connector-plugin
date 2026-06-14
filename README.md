@@ -23,15 +23,14 @@ _把 Claude Code / Codex / Gemini / OpenCode 会话搬进聊天窗口。_
 
 ### 预览
 
+<img decoding="async" width="150" align=right src="https://github.com/user-attachments/assets/130bf2fd-e116-4b89-aaa4-884dad5bf21c">
+
 - 示例中连接的是 Claude Code
-
-<img width="350" alt="image" src="https://github.com/user-attachments/assets/f01e4ca9-176d-4812-8177-3d63623d13d7" />
-
-<img width="350" alt="image" src="https://github.com/user-attachments/assets/8dfaf13d-d1a4-40c9-9d2b-91abaa071f1c" />
-
 - 支持 Markdown 图片回复
 
-<img width="350" alt="c2eabac3d8c4033bd63028e7d2bf9671" src="https://github.com/user-attachments/assets/130bf2fd-e116-4b89-aaa4-884dad5bf21c" />
+<img width="230" alt="image" src="https://github.com/user-attachments/assets/f01e4ca9-176d-4812-8177-3d63623d13d7" />
+
+<img width="230" alt="image" src="https://github.com/user-attachments/assets/8dfaf13d-d1a4-40c9-9d2b-91abaa071f1c" />
 
 
 ## 安装插件
@@ -79,13 +78,6 @@ hapi_endpoint: "http://127.0.0.1:3006"
 access_token: "your-token"
 ```
 
-快捷发送默认开启，默认前缀为 `>`；如果不想响应 quickSend，可以在锅巴关闭“启用快捷发送”，或把 `quick_prefix` 留空：
-
-```yaml
-quick_send_enabled: true
-quick_prefix: ">"
-```
-
 改完连接配置后重启云崽，让 SSE 监听和运行时缓存完整生效。
 
 ## 指令前缀
@@ -95,6 +87,7 @@ quick_prefix: ">"
 ```text
 /hapi list
 #hapi list
+#hapi help
 #hapi帮助
 ```
 
@@ -102,10 +95,7 @@ quick_prefix: ">"
 
 ```text
 > 继续刚才的任务
->{2} 帮我看一下报错
 ```
-
-也可以在锅巴里修改快捷前缀；当前缀为默认 `>` 时，同时兼容全角 `＞`。
 
 ## 常用命令
 
@@ -221,8 +211,8 @@ silence / simple / summary / detail
 
 ## 致谢
 
-- 本插件参考了 AstrBot 版 [`astrbot_plugin_hapi_connector`](https://github.com/LiJinHao999/astrbot_plugin_hapi_connector) 的命令设计
-
+- [astrbot_plugin_hapi_connector](https://github.com/LiJinHao999/astrbot_plugin_hapi_connector)：参考了该插件的命令设计和 Hapi 配置帮助说明
+- [siliconflow-plugin](https://github.com/AIGC-Yunzai/siliconflow-plugin)：借鉴了该插件的 Markdown 渲染实现
 
 ---
 

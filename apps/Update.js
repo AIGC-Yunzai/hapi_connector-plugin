@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const { exec, execSync } = require('node:child_process')
 const pluginName = 'hapi_connector-plugin'
+const pluginDir = `./plugins/${pluginName}/`
 let updating = false
 
 export class hapiUpdate extends plugin {
@@ -44,12 +45,11 @@ export class hapiUpdate extends plugin {
 
   async runUpdate(force, branch) {
     let command = ''
-    const pluginDir = `./plugins/${pluginName}/`
     if (force && branch) {
-      command = `git -C ${pluginDir} fetch --all && git -C ${pluginDir} reset --hard HEAD && git -C ${pluginDir} clean -fd && git -C ${pluginDir} checkout ${branch} && git -C ${pluginDir} reset --hard origin/${branch}`
+      command = `git -C ${pluginDir} config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*" && git -C ${pluginDir} fetch origin && git -C ${pluginDir} reset --hard HEAD && git -C ${pluginDir} clean -fd && git -C ${pluginDir} checkout ${branch} && git -C ${pluginDir} fetch --all && git -C ${pluginDir} reset --hard origin/${branch}`
       await this.reply(`正在执行 ${branch} 分支强制更新，请稍等`)
     } else if (force) {
-      command = `git -C ${pluginDir} reset --hard HEAD && git -C ${pluginDir} clean -fd && git -C ${pluginDir} fetch --all && git -C ${pluginDir} reset --hard @{u}`
+      command = `git -C ${pluginDir} reset --hard HEAD && git -C ${pluginDir} clean -fd && git -C ${pluginDir} checkout . && git -C ${pluginDir} fetch --all && git -C ${pluginDir} reset --hard @{u}`
       await this.reply('正在执行强制更新，请稍等')
     } else {
       command = `git -C ${pluginDir} pull --no-rebase`
@@ -69,10 +69,23 @@ export class hapiUpdate extends plugin {
       return true
     }
 
+    await this.installDeps()
     await this.reply(`${pluginName}${branch ? `(${branch}分支)` : ''} 更新完成\n最后更新时间：${time}`)
     const log = await this.getLog()
     if (log) await this.reply(log)
     this.isUp = true
+    return true
+  }
+
+  async installDeps() {
+    await this.reply('更新拉取完成，正在执行 pnpm i 安装依赖，请稍等...')
+    const ret = await this.exec(`cd ${pluginDir} && pnpm i`)
+    if (ret.error) {
+      logger.error(`[${pluginName}] 依赖安装失败：\n${ret.stderr || ret.error}`)
+      await this.reply('依赖安装失败，请手动前往插件目录执行 pnpm i')
+      return false
+    }
+    logger.mark(`[${pluginName}] 依赖安装成功`)
     return true
   }
 
@@ -93,7 +106,11 @@ export class hapiUpdate extends plugin {
       lines.push(text)
     }
     if (!lines.length) return ''
-    return this.makeForwardMsg(`${pluginName} 更新日志，共 ${lines.length} 条`, lines.join('\n\n'), '更新后将自动重启云崽以生效')
+    return this.makeForwardMsg(
+      `${pluginName} 更新日志，共 ${lines.length} 条`,
+      lines.join('\n\n'),
+      '更多详细信息，请前往 GitHub 查看\nhttps://github.com/AIGC-Yunzai/hapi_connector-plugin/commits/main\n\n更新后将自动重启云崽以生效',
+    )
   }
 
   async makeForwardMsg(title, msg, end) {
