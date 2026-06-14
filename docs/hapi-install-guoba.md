@@ -14,7 +14,7 @@
 如果你使用 `Yunzai-Bot-Shell`，推荐直接走脚本菜单。
 
 ```sh
-bash <(curl -sL https://github.com/misaka20002/Bot-Install-Shell/raw/master/Manage/SYS_Manage.sh)
+bash <(curl -sL https://github.com/misaka20002/Bot-Install-Shell/raw/master/Manage/Hapi_Claude_Manage.sh)
 ```
 
 
