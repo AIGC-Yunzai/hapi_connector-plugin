@@ -49,7 +49,6 @@ export function supportGuoba() {
     helpItem('machines', '查看在线机器', '#hapi machines'),
     helpItem('create', '创建 session（不带完整参数进入分步向导）', '#hapi create <machineId> <目录> <agent> [simple|worktree] [模型] [推理强度] [权限模式] [yolo]'),
     helpItem('abort', '中断 session', '#hapi abort [目标]'),
-    helpItem('remote', '切到 remote 托管模式', '#hapi remote'),
     helpItem('archive', '归档当前 session', '#hapi archive'),
     helpItem('resume', '恢复 inactive session', '#hapi resume [目标]'),
     helpItem('rename', '重命名当前 session', '#hapi rename <新标题>'),

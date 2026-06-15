@@ -330,7 +330,6 @@ export function helpNodes(topic = '', config = {}) {
       '#hapi machines          查看在线机器',
       '#hapi create <machineId> <目录> <agent> [simple|worktree] [模型] [推理强度] [权限模式] [yolo]',
       '#hapi abort [目标]      中断 session',
-      '#hapi remote            切到 remote 托管模式',
       '#hapi archive           归档当前 session',
       '#hapi resume [目标]     恢复 inactive session',
       '#hapi delete [目标]     删除 session',
