@@ -97,6 +97,9 @@ access_token: "your-token"
 > 继续刚才的任务
 ```
 
+> [!IMPORTANT]
+> 所有 `#hapi` 指令仅对云崽主人权限生效，普通用户无法使用任何 HAPI 指令
+
 ## 常用命令
 
 ### 会话查看

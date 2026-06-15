@@ -19,6 +19,16 @@ export function supportGuoba() {
     return schema
   }
   const helpSchemas = [
+    {
+      field: 'help_permission_note',
+      label: '⚠️ 权限说明',
+      component: 'Input',
+      componentProps: {
+        readonly: true,
+        defaultValue: '所有 #hapi 指令仅对云崽主人权限生效'
+      },
+      bottomHelpMessage: '普通用户无法使用任何 HAPI 指令',
+    },
     helpDivider('会话与对话'),
     helpItem('list', '查看 session 列表（当前聊天 / 全部）', '#hapi list [all]', '切换到某 session 后，将同步 HAPI 消息发送到当前群/私聊'),
     helpItem('sw', '切换当前 session', '#hapi sw <序号|ID前缀>', '切换到该 session 后，将同步 HAPI 消息发送到当前群/私聊'),
