@@ -332,8 +332,9 @@ export function helpNodes(topic = '', config = {}) {
       '#hapi abort [目标]      中断 session',
       '#hapi archive           归档当前 session',
       '#hapi resume [目标]     恢复 inactive session',
-      '#hapi delete [目标]     删除 session',
       '#hapi rename <标题>     重命名当前 session',
+      '#hapi delete [目标]     删除 session',
+      '#hapi trim <数量>       删除倒数 N 个已关闭会话',
       '#hapi clean [路径] confirm 清理 inactive sessions',
     ].join('\n'),
     [

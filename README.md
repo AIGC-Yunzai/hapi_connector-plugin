@@ -136,6 +136,7 @@ access_token: "your-token"
 #hapi resume [序号|ID前缀]                       恢复 inactive session
 #hapi rename <新标题>                            重命名当前 session
 #hapi delete [序号|ID前缀]                       删除 session
+#hapi trim <数量>                               删除倒数 N 个已关闭会话
 #hapi clean [路径前缀] confirm                   清理 inactive sessions
 ```
 

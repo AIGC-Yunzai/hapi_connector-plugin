@@ -169,6 +169,8 @@ export class HapiConnector extends plugin {
           return this.cmdRename(e, arg)
         case 'delete':
           return this.cmdDelete(e, arg)
+        case 'trim':
+          return this.cmdTrim(e, arg)
         case 'clean':
           return this.cmdClean(e, arg)
         case 'remote':
@@ -665,6 +667,88 @@ export class HapiConnector extends plugin {
       await this.refreshSessions()
     }
     return this.reply(msg)
+  }
+
+  async cmdTrim(e, arg) {
+    await this.refreshSessions()
+    const n = parseInt(arg)
+    if (!n || n <= 0) return this.reply('用法：#hapi trim <数量>\n删除倒数的 N 个已关闭会话')
+
+    // 获取所有已关闭的会话
+    const inactiveSessions = sessionsCache.filter(session => !session.active)
+    if (!inactiveSessions.length) return this.reply('没有已关闭的会话')
+
+    // 取倒数 N 个
+    const toDelete = inactiveSessions.slice(-Math.min(n, inactiveSessions.length))
+    if (!toDelete.length) return this.reply('没有符合条件的会话')
+
+    // 构建合并转发节点
+    const bot = e.bot ?? Bot
+    let nickname = bot.nickname || 'HAPI Connector'
+    if (e.isGroup) {
+      let info = null
+      try {
+        if (bot.getGroupMemberInfo) info = await bot.getGroupMemberInfo(e.group_id, bot.uin)
+        else if (bot.pickMember) info = await bot.pickMember(e.group_id, bot.uin)
+      } catch {}
+      nickname = info?.card || info?.nickname || nickname
+    }
+    const userInfo = { user_id: bot.uin, nickname }
+
+    // 创建会话列表节点
+    const nodes = [{ ...userInfo, message: `即将删除以下 ${toDelete.length} 个已关闭的会话：` }]
+
+    for (const session of toDelete) {
+      const meta = session.metadata || {}
+      const title = meta.summary?.text || meta.name || '(无标题)'
+      const path = meta.path || '(无路径)'
+      const flavor = meta.flavor || '?'
+      const model = session.modelMode || 'default'
+      const nodeText = [
+        `[${session.id.slice(0, 8)}] ${title}`,
+        `路径: ${path}`,
+        `${flavor}:${model}`,
+      ].join('\n')
+      nodes.push({ ...userInfo, message: nodeText })
+    }
+
+    nodes.push({ ...userInfo, message: '请在 120 秒内发送"确认"或"yes"来删除这些会话\n发送"取消"退出' })
+
+    // 发送合并转发
+    let forwardMsg
+    if (e.group?.makeForwardMsg) forwardMsg = await e.group.makeForwardMsg(nodes)
+    else if (e.friend?.makeForwardMsg) forwardMsg = await e.friend.makeForwardMsg(nodes)
+
+    if (forwardMsg) {
+      await e.reply(forwardMsg)
+    } else {
+      // 降级为普通文本
+      const text = nodes.map(node => node.message).join('\n\n')
+      await this.reply(text)
+    }
+
+    // 等待用户确认
+    const next = await this.awaitContext()
+    if (!next) return this.reply('操作超时，已取消')
+
+    const response = String(next.msg || '').trim().toLowerCase()
+    if (!['确认', 'yes', 'y', '是'].includes(response)) {
+      return this.reply('操作已取消', true)
+    }
+
+    // 执行删除
+    let okCount = 0
+    const lines = []
+    for (const session of toDelete) {
+      const [ok, msg] = await ops.deleteSession(this.client, session.id)
+      if (ok) {
+        okCount += 1
+        State.clearSession(session.id)
+      }
+      lines.push(msg)
+    }
+    await this.refreshSessions()
+    return this.reply(`删除完成: ${okCount}/${toDelete.length}\n${lines.join('\n')}`)
   }
 
   async cmdRename(e, arg) {
