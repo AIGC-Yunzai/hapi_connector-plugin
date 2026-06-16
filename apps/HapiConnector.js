@@ -354,7 +354,11 @@ export class HapiConnector extends plugin {
     const session = this.resolveSession(target)
     if (!session) return this.reply(`未找到匹配的 session：${target || '(空)'}`)
     State.setCurrent(e, session.id, session.metadata?.flavor || '')
-    return this.reply(`已切换到 [${session.metadata?.flavor || '?'}] ${session.id.slice(0, 8)} ${session.metadata?.summary?.text || ''}\n消息将推送到当前${e.isGroup ? '群' : '私'}聊`)
+    const meta = session.metadata || {}
+    const title = meta.summary?.text || meta.name || ''
+    const flavor = meta.flavor || '?'
+    const displayText = title ? `[${flavor}] ${session.id.slice(0, 8)} ${title}` : `[${flavor}] ${session.id.slice(0, 8)}`
+    return this.reply(`已切换到 ${displayText}\n消息将推送到当前${e.isGroup ? '群' : '私'}聊`)
   }
 
   async cmdStatus(e) {
