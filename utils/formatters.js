@@ -117,6 +117,17 @@ export function formatSessionListNodes(sessions, currentSid = '', allSessions = 
     ].join('\n'))
   }
 
+  // 检查运行中的会话数量，如果 >= 4 个则添加提醒
+  const activeSessions = sessions.filter(session => session.active)
+  if (activeSessions.length >= 4) {
+    nodes.push([
+      '⚠️ 内存提醒',
+      `当前有 ${activeSessions.length} 个运行中的会话`,
+      '每个运行中的 session 都会消耗内存，请及时关闭不需要的会话',
+      '使用 #hapi abort [目标] 中断会话',
+    ].join('\n'))
+  }
+
   nodes.push('切换会话：\n #hapi sw <序号或ID前缀>')
   return nodes
 }
