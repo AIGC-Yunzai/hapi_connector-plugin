@@ -49,3 +49,6 @@ max_reconnect_attempts: 30
 
 # 是否随插件启动 SSE 监听
 enable_sse: true
+
+# 小功能
+delay_yolo_mode: false

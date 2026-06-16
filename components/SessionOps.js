@@ -135,3 +135,52 @@ export async function readFile(client, sid, path) {
   if (!data.success) return [false, data.error || data.message || '读取失败']
   return [true, data.content || '']
 }
+
+const YOLO_MODES = ['bypassPermissions', 'yolo'];
+const _yoloQueues = new Map();
+
+/**
+ * Send message with delayed YOLO mode workaround.
+ * If delay_yolo_mode is enabled and current permissionMode is bypassPermissions/yolo,
+ * temporarily switch to default before sending, then restore after 3 seconds.
+ * Uses per-session queue to serialize operations within the same session.
+ */
+export async function sendMessageWithDelayYolo(client, sid, text, attachments = [], options = {}) {
+  const { delay_yolo_mode: delayed = false } = options;
+
+  if (!delayed) {
+    return sendMessage(client, sid, text, attachments);
+  }
+
+  const prev = _yoloQueues.get(sid) || Promise.resolve();
+  const task = prev.then(async () => {
+    let currentMode = 'default';
+    try {
+      const detail = await fetchSessionDetail(client, sid);
+      currentMode = detail.permissionMode || 'default';
+    } catch {
+      // If detail fetch fails, send directly
+      return sendMessage(client, sid, text, attachments);
+    }
+
+    const isYolo = YOLO_MODES.includes(currentMode);
+
+    if (isYolo) {
+      const [ok] = await setPermissionMode(client, sid, 'default');
+      if (!ok) return sendMessage(client, sid, text, attachments);
+    }
+
+    const result = await sendMessage(client, sid, text, attachments);
+
+    if (isYolo) {
+      await new Promise(r => setTimeout(r, 3000));
+      await setPermissionMode(client, sid, currentMode);
+    }
+
+    return result;
+  });
+
+  // Chain the queue: next task waits for this one to settle (success or failure)
+  _yoloQueues.set(sid, task.catch(() => {}));
+  return task;
+}

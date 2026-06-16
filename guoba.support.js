@@ -245,6 +245,17 @@ export function supportGuoba() {
           bottomHelpMessage: '填写24进制时间，如 07:00',
         },
         {
+          component: 'Divider',
+          label: '小功能',
+          componentProps: { orientation: 'left', plain: true },
+        },
+        {
+          field: 'delay_yolo_mode',
+          label: '延迟YOLO模式',
+          component: 'Switch',
+          bottomHelpMessage: '开启后，消息发送时若当前为 YOLO/bypassPermissions，先切 default 发送，3秒后自动恢复 YOLO/bypassPermissions 模式，用于某些站点无法直接开启 YOLO/bypassPermissions',
+        },
+        {
           label: '帮助',
           component: 'SOFT_GROUP_BEGIN',
         },

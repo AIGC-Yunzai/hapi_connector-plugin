@@ -211,6 +211,12 @@ export class HapiConnector extends plugin {
     }
   }
 
+  async _sendMessage(sid, text, attachments = []) {
+    return ops.sendMessageWithDelayYolo(this.client, sid, text, attachments, {
+      delay_yolo_mode: !!this.config?.delay_yolo_mode,
+    });
+  }
+
   async quickSend(e) {
     if (!e.isMaster) return false
     this.config = Config.getConfig()
@@ -232,7 +238,7 @@ export class HapiConnector extends plugin {
       if (!session) return this.reply(`无效序号 ${match[1]}，共 ${sessionsCache.length} 个 session`)
       const [uploadText, attachments] = await this.uploadMessageAttachments(e, session.id)
       const messageText = await this.withQuotedText(e, match[2])
-      const [, reply] = await ops.sendMessage(this.client, session.id, messageText, attachments)
+      const [, reply] = await this._sendMessage(session.id, messageText, attachments)
       logger.info(`[hapi-connector] quickSend 触发: ${State.formatWindowKey(State.windowKey(e))} -> ${session.id.slice(0, 8)}`)
       if (uploadText) await this.reply(uploadText)
       return this.reply(reply)
@@ -242,7 +248,7 @@ export class HapiConnector extends plugin {
     if (!sid) return this.reply('请先用 #hapi sw <序号> 选择一个 session')
     const [uploadText, attachments] = await this.uploadMessageAttachments(e, sid)
     const messageText = await this.withQuotedText(e, rest)
-    const [, reply] = await ops.sendMessage(this.client, sid, messageText, attachments)
+    const [, reply] = await this._sendMessage(sid, messageText, attachments)
     logger.info(`[hapi-connector] quickSend 触发: ${State.formatWindowKey(State.windowKey(e))} -> ${sid.slice(0, 8)}`)
     if (uploadText) await this.reply(uploadText)
     return this.reply(reply)
@@ -264,7 +270,7 @@ export class HapiConnector extends plugin {
 
     const [uploadText, attachments] = await this.uploadMessageAttachments(e, session.id)
     const messageText = await this.withQuotedText(e, text)
-    const [, reply] = await ops.sendMessage(this.client, session.id, messageText, attachments)
+    const [, reply] = await this._sendMessage(session.id, messageText, attachments)
     logger.info(`[hapi-connector] chat 触发: ${State.formatWindowKey(State.windowKey(e))} -> ${session.id.slice(0, 8)}`)
     if (uploadText) await this.reply(uploadText)
     return this.reply(reply)
@@ -282,7 +288,7 @@ export class HapiConnector extends plugin {
     if (!attachments.length) return this.reply('没有成功上传的附件，已取消发送')
 
     const text = await this.withQuotedText(e, request.text || `请查看这 ${attachments.length} 个附件。`)
-    const [, reply] = await ops.sendMessage(this.client, session.id, text, attachments)
+    const [, reply] = await this._sendMessage(session.id, text, attachments)
     logger.info(`[hapi-connector] quickSend 附件触发: ${State.formatWindowKey(State.windowKey(e))} -> ${session.id.slice(0, 8)} (${attachments.length})`)
     return this.reply(reply)
   }
@@ -387,7 +393,7 @@ export class HapiConnector extends plugin {
     if (!session) return this.reply(`未找到 session：${parts[0]}`)
     const [uploadText, attachments] = await this.uploadMessageAttachments(e, session.id)
     const messageText = await this.withQuotedText(e, arg.slice(parts[0].length).trim())
-    const [, msg] = await ops.sendMessage(this.client, session.id, messageText, attachments)
+    const [, msg] = await this._sendMessage(session.id, messageText, attachments)
     if (uploadText) await this.reply(uploadText)
     return this.reply(msg)
   }
@@ -694,7 +700,7 @@ export class HapiConnector extends plugin {
       try {
         if (bot.getGroupMemberInfo) info = await bot.getGroupMemberInfo(e.group_id, bot.uin)
         else if (bot.pickMember) info = await bot.pickMember(e.group_id, bot.uin)
-      } catch {}
+      } catch { }
       nickname = info?.card || info?.nickname || nickname
     }
     const userInfo = { user_id: bot.uin, nickname }
