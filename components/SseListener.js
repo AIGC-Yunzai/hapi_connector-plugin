@@ -7,6 +7,7 @@ import {
   sessionLabel,
 } from '../utils/formatters.js'
 import { buildMarkdownOutputs, nodesToMarkdown } from '../utils/markdownPic.js'
+import { collectGeneratedImagesFromMessages, imageSegmentFromBuffer } from '../utils/generatedImages.js'
 
 export class SseListener {
   constructor(client, sessions, notify) {
@@ -219,18 +220,7 @@ export class SseListener {
         })
         .filter(Boolean)
 
-      const generatedImages = []
-      for (const msg of agentMessages) {
-        // msg.content 可能是 { role: 'agent', content: { type: 'output', data: {...} } }
-        // 或者包装成 { message: { role: 'agent', content: { type: 'output', data: {...} } } }
-        const agentContent = msg.content?.message || msg.content
-        if (agentContent?.content?.type === 'output' && agentContent?.content?.data) {
-          const data = agentContent.content.data
-          if (data && typeof data === 'object' && data.type === 'generated-image' && data.imageId) {
-            generatedImages.push({ imageId: data.imageId, fileName: data.fileName || '图片' })
-          }
-        }
-      }
+      const generatedImages = collectGeneratedImagesFromMessages(agentMessages)
 
       const count = Number(this.config?.summary_msg_count || 5)
       const picked = this.config?.output_level === 'summary' ? visible.slice(-count) : visible
@@ -244,7 +234,7 @@ export class SseListener {
       for (const img of generatedImages) {
         const buffer = await ops.fetchGeneratedImage(this.client, sid, img.imageId)
         if (buffer) {
-          await this.notify(global.segment.image(buffer), sid)
+          await this.notify(imageSegmentFromBuffer(buffer, img), sid)
         } else {
           logger.debug(`[hapi-connector] 无法获取图片: ${img.imageId}`)
         }

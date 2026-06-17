@@ -27,6 +27,7 @@ function extractInner(value, limit) {
 
   const type = value.type || ''
   if (type === 'text') return String(value.text || '').slice(0, limit)
+  if (['generated-image', 'generated_image'].includes(type)) return ''
   if (['tool_result', 'tool-call-result', 'token_count', 'thinking'].includes(type)) return ''
   if (['tool_use', 'tool-call'].includes(type)) {
     const name = value.name || '?'

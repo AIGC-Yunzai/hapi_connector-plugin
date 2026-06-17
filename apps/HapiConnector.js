@@ -14,6 +14,7 @@ import {
 } from '../components/FileOps.js'
 import { smartReply } from '../utils/reply.js'
 import { buildMarkdownOutputs, nodesToMarkdown } from '../utils/markdownPic.js'
+import { collectGeneratedImagesFromMessages, imageSegmentFromBuffer } from '../utils/generatedImages.js'
 import {
   CLAUDE_EFFORTS,
   CODEX_EFFORTS,
@@ -381,6 +382,7 @@ export class HapiConnector extends plugin {
     const nodes = formatMessageNodes(messages)
     const outs = await buildMarkdownOutputs(this.config?.markdown_output, nodes, nodesToMarkdown(nodes))
     for (const out of outs) await this.reply(out)
+    await this.replyGeneratedImages(sid, collectGeneratedImagesFromMessages(messages))
     return
   }
 
@@ -1119,6 +1121,17 @@ export class HapiConnector extends plugin {
     if (!quotedText) return text
     const message = String(text || '')
     return message.startsWith(quotedText) ? message : `${quotedText}\n\n${message}`
+  }
+
+  async replyGeneratedImages(sid, images) {
+    for (const img of images || []) {
+      const buffer = await ops.fetchGeneratedImage(this.client, sid, img.imageId)
+      if (buffer) {
+        await this.reply(imageSegmentFromBuffer(buffer, img))
+      } else {
+        logger.debug(`[hapi-connector] 无法获取图片: ${img.imageId}`)
+      }
+    }
   }
 
 }
