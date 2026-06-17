@@ -29,6 +29,7 @@ import {
   formatSessionStatus,
   helpNodes,
   isQuestionRequest,
+  sessionLabelWithRuntime,
 } from '../utils/formatters.js'
 
 const sessionsCache = []
@@ -378,8 +379,11 @@ export class HapiConnector extends plugin {
     const sid = State.currentSid(e)
     if (!sid) return this.reply('请先用 #hapi sw <序号> 选择一个 session')
     const limit = Math.min(Math.max(Number(arg) || 10, 1), 100)
-    const messages = await ops.fetchMessages(this.client, sid, limit)
-    const nodes = formatMessageNodes(messages)
+    const [messages, detail] = await Promise.all([
+      ops.fetchMessages(this.client, sid, limit),
+      this.fetchSessionHeaderDetail(sid),
+    ])
+    const nodes = [sessionLabelWithRuntime(detail || sid, detail ? [detail] : sessionsCache), ...formatMessageNodes(messages)]
     const outs = await buildMarkdownOutputs(this.config?.markdown_output, nodes, nodesToMarkdown(nodes))
     for (const out of outs) await this.reply(out)
     await this.replyGeneratedImages(sid, collectGeneratedImagesFromMessages(messages))
@@ -1131,6 +1135,15 @@ export class HapiConnector extends plugin {
       } else {
         logger.debug(`[hapi-connector] 无法获取图片: ${img.imageId}`)
       }
+    }
+  }
+
+  async fetchSessionHeaderDetail(sid) {
+    try {
+      return await ops.fetchSessionDetail(this.client, sid)
+    } catch (err) {
+      logger.debug(`[hapi-connector] 获取 session 详情失败: ${err.message || err}`)
+      return sessionsCache.find(item => item.id === sid) || null
     }
   }
 

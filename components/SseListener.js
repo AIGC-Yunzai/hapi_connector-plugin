@@ -5,6 +5,7 @@ import {
   formatRequestNodes,
   isQuestionRequest,
   sessionLabel,
+  sessionLabelWithRuntime,
 } from '../utils/formatters.js'
 import { buildMarkdownOutputs, nodesToMarkdown } from '../utils/markdownPic.js'
 import { collectGeneratedImagesFromMessages, imageSegmentFromBuffer } from '../utils/generatedImages.js'
@@ -150,8 +151,18 @@ export class SseListener {
       session = { id: sid, metadata: {} }
       this.sessions.push(session)
     }
-    for (const key of ['active', 'thinking', 'pendingRequestsCount', 'permissionMode', 'modelMode', 'collaborationMode']) {
-      if (data[key] !== undefined && data[key] !== null) session[key] = data[key]
+    for (const key of [
+      'active',
+      'thinking',
+      'pendingRequestsCount',
+      'permissionMode',
+      'modelMode',
+      'model',
+      'modelReasoningEffort',
+      'effort',
+      'collaborationMode',
+    ]) {
+      if (data[key] !== undefined) session[key] = data[key]
     }
     if (data.metadata && typeof data.metadata === 'object') {
       session.metadata = { ...(session.metadata || {}), ...data.metadata }
@@ -185,6 +196,8 @@ export class SseListener {
 
     if (Object.keys(requests).length) this.pending[sid] = requests
     else delete this.pending[sid]
+
+    if (newItems.length) await this.refreshSessionDetail(sid)
 
     for (const [rid, req] of newItems) {
       if (this.config?.auto_approve_enabled && this.inAutoApproveWindow() && !isQuestionRequest(req)) {
@@ -225,7 +238,8 @@ export class SseListener {
       const count = Number(this.config?.summary_msg_count || 5)
       const picked = this.config?.output_level === 'summary' ? visible.slice(-count) : visible
       if (picked.length) {
-        const payload = [sessionLabel(sid, this.sessions), ...picked]
+        const header = await this.buildSessionHeader(sid)
+        const payload = [header, ...picked]
         const outs = await buildMarkdownOutputs(this.config?.markdown_output, payload, nodesToMarkdown(payload))
         for (const out of outs) await this.notify(out, sid)
       }
@@ -242,7 +256,7 @@ export class SseListener {
 
       // 仅图片模式下不发「会话已完成」文字，避免图片后又跟一句纯文字提示
       if (this.config?.markdown_output !== 'image') {
-        await this.notify(`会话已完成，等待新的输入\n${sessionLabel(sid, this.sessions)}`, sid)
+        await this.notify(`【会话已完成，等待新的输入】\n${sessionLabel(sid, this.sessions)}`, sid)
       }
     } catch (err) {
       logger.debug(`[hapi-connector] 拉取会话消息失败: ${err.message || err}`)
@@ -260,6 +274,22 @@ export class SseListener {
       return start <= end ? minutes >= start && minutes <= end : minutes >= start || minutes <= end
     } catch {
       return false
+    }
+  }
+
+  async buildSessionHeader(sid) {
+    const detail = await this.refreshSessionDetail(sid)
+    return sessionLabelWithRuntime(detail || sid, detail ? [detail] : this.sessions)
+  }
+
+  async refreshSessionDetail(sid) {
+    try {
+      const detail = await ops.fetchSessionDetail(this.client, sid)
+      this.updateSessionCache(sid, detail)
+      return detail
+    } catch (err) {
+      logger.debug(`[hapi-connector] 获取 session 详情失败: ${err.message || err}`)
+      return null
     }
   }
 }

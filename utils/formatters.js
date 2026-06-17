@@ -52,9 +52,7 @@ function extractInner(value, limit) {
 }
 
 export function sessionLabel(sessionOrSid, sessions = []) {
-  const session = typeof sessionOrSid === 'string'
-    ? sessions.find(item => item.id === sessionOrSid)
-    : sessionOrSid
+  const session = resolveSessionRef(sessionOrSid, sessions)
   const sid = typeof sessionOrSid === 'string' ? sessionOrSid : sessionOrSid?.id
   if (!session) return `会话 ${String(sid || '').slice(0, 8)}`
   const meta = session.metadata || {}
@@ -62,6 +60,57 @@ export function sessionLabel(sessionOrSid, sessions = []) {
   const path = meta.path || '(无路径)'
   const flavor = meta.flavor || '?'
   return `${title}\n路径: ${path}\n${flavor} | ${session.id.slice(0, 8)}`
+}
+
+export function sessionLabelWithRuntime(sessionOrSid, sessions = []) {
+  const label = sessionLabel(sessionOrSid, sessions)
+  const runtime = sessionRuntimeInfo(sessionOrSid, sessions)
+  if (!runtime) return label
+  const lines = String(label).split('\n')
+  lines[lines.length - 1] = `${lines[lines.length - 1]} | ${runtime}`
+  return lines.join('\n')
+}
+
+export function sessionRuntimeInfo(sessionOrSid, sessions = []) {
+  const session = resolveSessionRef(sessionOrSid, sessions)
+  if (!session) return ''
+  const meta = session.metadata || {}
+  const flavor = String(meta.flavor || '').toLowerCase()
+  const permission = firstNonEmpty(session.permissionMode, session.permission_mode) || 'default'
+  const model = firstNonEmpty(session.model, session.modelMode, session.model_mode) || 'default'
+  const effort = formatReasoningEffort(session, flavor)
+  const values = [permission, model, effort]
+  if (isPlanSession(session) && !values.includes('plan')) values.push('plan')
+  return values.join(' | ')
+}
+
+function resolveSessionRef(sessionOrSid, sessions = []) {
+  return typeof sessionOrSid === 'string'
+    ? sessions.find(item => item.id === sessionOrSid)
+    : sessionOrSid
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue
+    const text = String(value).trim()
+    if (text) return text
+  }
+  return ''
+}
+
+function formatReasoningEffort(session, flavor = '') {
+  const modelReasoningEffort = firstNonEmpty(session.modelReasoningEffort, session.model_reasoning_effort)
+  const effort = firstNonEmpty(session.effort)
+  if (modelReasoningEffort) return modelReasoningEffort
+  if (effort) return effort
+  if (flavor === 'claude') return 'auto'
+  if (['codex', 'opencode'].includes(flavor)) return '继承默认'
+  return 'default'
+}
+
+function isPlanSession(session) {
+  return session.permissionMode === 'plan' || session.collaborationMode === 'plan'
 }
 
 export function formatSessionList(sessions, currentSid = '', allSessions = null) {
@@ -217,7 +266,7 @@ function formatRequestFull(req) {
  * @returns {string[]} 节点字符串数组
  */
 export function formatRequestNodes(sid, req, total, sessions, config = {}) {
-  const label = sessionLabel(sid, sessions)
+  const label = sessionLabelWithRuntime(sid, sessions)
   const question = isQuestionRequest(req)
   const cmdLines = [
     `当前共 ${total} 个待审批`,
