@@ -7,7 +7,6 @@ import {
   sessionLabel,
 } from '../utils/formatters.js'
 import { buildMarkdownOutputs, nodesToMarkdown } from '../utils/markdownPic.js'
-import { segment } from 'icqq'
 
 export class SseListener {
   constructor(client, sessions, notify) {
@@ -245,7 +244,7 @@ export class SseListener {
       for (const img of generatedImages) {
         const buffer = await ops.fetchGeneratedImage(this.client, sid, img.imageId)
         if (buffer) {
-          await this.notify(segment.image(buffer), sid)
+          await this.notify(global.segment.image(buffer), sid)
         } else {
           logger.debug(`[hapi-connector] 无法获取图片: ${img.imageId}`)
         }
