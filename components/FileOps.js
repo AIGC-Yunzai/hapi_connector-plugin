@@ -93,7 +93,7 @@ async function resolveQuotedMessageContext(e) {
       }
     }
   } catch (err) {
-    logger.debug(`[hapi-connector] 获取 reply_id 引用消息失败: ${err.message || err}`)
+    logger.info(`[hapi-connector] 获取 reply_id 引用消息失败: ${err.message || err}`)
   }
 
   try {
@@ -120,7 +120,7 @@ async function resolveQuotedMessageContext(e) {
       messageId: e.source.seq || e.source.time,
     }
   } catch (err) {
-    logger.debug(`[hapi-connector] 获取 source 引用消息失败: ${err.message || err}`)
+    logger.info(`[hapi-connector] 获取 source 引用消息失败: ${err.message || err}`)
     return emptyQuotedContext()
   }
 }

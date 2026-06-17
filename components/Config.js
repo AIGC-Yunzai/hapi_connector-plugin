@@ -69,7 +69,7 @@ class Config {
         this.cache = null
       })
     } catch (err) {
-      logger.debug('[hapi-connector] 配置监听失败', err)
+      logger.warn('[hapi-connector] 配置监听失败', err)
     }
   }
 }

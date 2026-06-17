@@ -111,7 +111,7 @@ export class SseListener {
         try {
           await this.handle(JSON.parse(line.slice(6)))
         } catch (err) {
-          logger.debug('[hapi-connector] 忽略无法解析的 SSE 事件', err)
+          logger.warn('[hapi-connector] 忽略无法解析的 SSE 事件', err)
         }
       }
     }
@@ -250,7 +250,7 @@ export class SseListener {
         if (buffer) {
           await this.notify(imageSegmentFromBuffer(buffer, img), sid)
         } else {
-          logger.debug(`[hapi-connector] 无法获取图片: ${img.imageId}`)
+          logger.warn(`[hapi-connector] 无法获取图片: ${img.imageId}`)
         }
       }
 
@@ -259,7 +259,7 @@ export class SseListener {
         await this.notify(`【会话已完成，等待新的输入】\n${sessionLabel(sid, this.sessions)}`, sid)
       }
     } catch (err) {
-      logger.debug(`[hapi-connector] 拉取会话消息失败: ${err.message || err}`)
+      logger.warn(`[hapi-connector] 拉取会话消息失败: ${err.message || err}`)
     }
   }
 
@@ -289,7 +289,7 @@ export class SseListener {
       this.updateSessionCache(sid, detail)
       return detail
     } catch (err) {
-      logger.debug(`[hapi-connector] 获取 session 详情失败: ${err.message || err}`)
+      logger.warn(`[hapi-connector] 获取 session 详情失败: ${err.message || err}`)
       return null
     }
   }

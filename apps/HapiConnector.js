@@ -1100,7 +1100,7 @@ export class HapiConnector extends plugin {
         await smartReply(event, msg)
         return
       } catch (err) {
-        logger.debug(`[hapi-connector] 重建事件 reply 失败，尝试缓存事件: ${err.message || err}`)
+        logger.warn(`[hapi-connector] 重建事件 reply 失败，尝试缓存事件: ${err.message || err}`)
       }
     }
     const cachedEvent = State.eventCache.get(key)
@@ -1109,7 +1109,7 @@ export class HapiConnector extends plugin {
         await smartReply(cachedEvent, msg)
         return
       } catch (err) {
-        logger.debug(`[hapi-connector] 缓存事件 reply 失败，尝试直接发送: ${err.message || err}`)
+        logger.warn(`[hapi-connector] 缓存事件 reply 失败，尝试直接发送: ${err.message || err}`)
       }
     }
     await sendByWindowKey(key, msg)
@@ -1145,7 +1145,7 @@ export class HapiConnector extends plugin {
       if (buffer) {
         await this.reply(imageSegmentFromBuffer(buffer, img))
       } else {
-        logger.debug(`[hapi-connector] 无法获取图片: ${img.imageId}`)
+        logger.warn(`[hapi-connector] 无法获取图片: ${img.imageId}`)
       }
     }
   }
@@ -1154,7 +1154,7 @@ export class HapiConnector extends plugin {
     try {
       return await ops.fetchSessionDetail(this.client, sid)
     } catch (err) {
-      logger.debug(`[hapi-connector] 获取 session 详情失败: ${err.message || err}`)
+      logger.warn(`[hapi-connector] 获取 session 详情失败: ${err.message || err}`)
       return sessionsCache.find(item => item.id === sid) || null
     }
   }
@@ -1467,7 +1467,7 @@ async function sendByWindowKey(key, text) {
       reply: msg => target.sendMsg(msg),
     }, text)
   } catch (err) {
-    logger.debug(`[hapi-connector] 主动推送失败: ${err.message || err}`)
+    logger.warn(`[hapi-connector] 主动推送失败: ${err.message || err}`)
   }
 }
 
@@ -1497,7 +1497,7 @@ async function buildEventFromWindowKey(key) {
       await Bot.prepareEvent(event)
     }
   } catch (err) {
-    logger.debug(`[hapi-connector] 构造推送事件失败: ${err.message || err}`)
+    logger.warn(`[hapi-connector] 构造推送事件失败: ${err.message || err}`)
   }
   return event
 }
