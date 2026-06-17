@@ -197,7 +197,7 @@ export class SseListener {
     if (Object.keys(requests).length) this.pending[sid] = requests
     else delete this.pending[sid]
 
-    if (newItems.length) await this.refreshSessionDetail(sid)
+    if (newItems.length && this.config?.more_session_info) await this.refreshSessionDetail(sid)
 
     for (const [rid, req] of newItems) {
       if (this.config?.auto_approve_enabled && this.inAutoApproveWindow() && !isQuestionRequest(req)) {
@@ -278,6 +278,7 @@ export class SseListener {
   }
 
   async buildSessionHeader(sid) {
+    if (!this.config?.more_session_info) return sessionLabel(sid, this.sessions)
     const detail = await this.refreshSessionDetail(sid)
     return sessionLabelWithRuntime(detail || sid, detail ? [detail] : this.sessions)
   }

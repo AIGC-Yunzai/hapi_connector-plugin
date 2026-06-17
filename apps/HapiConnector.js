@@ -29,6 +29,7 @@ import {
   formatSessionStatus,
   helpNodes,
   isQuestionRequest,
+  sessionLabel,
   sessionLabelWithRuntime,
 } from '../utils/formatters.js'
 
@@ -379,11 +380,22 @@ export class HapiConnector extends plugin {
     const sid = State.currentSid(e)
     if (!sid) return this.reply('请先用 #hapi sw <序号> 选择一个 session')
     const limit = Math.min(Math.max(Number(arg) || 10, 1), 100)
-    const [messages, detail] = await Promise.all([
-      ops.fetchMessages(this.client, sid, limit),
-      this.fetchSessionHeaderDetail(sid),
-    ])
-    const nodes = [sessionLabelWithRuntime(detail || sid, detail ? [detail] : sessionsCache), ...formatMessageNodes(messages)]
+    let messages
+    let detail = null
+    if (this.config?.more_session_info) {
+      const result = await Promise.all([
+        ops.fetchMessages(this.client, sid, limit),
+        this.fetchSessionHeaderDetail(sid),
+      ])
+      messages = result[0]
+      detail = result[1]
+    } else {
+      messages = await ops.fetchMessages(this.client, sid, limit)
+    }
+    const header = this.config?.more_session_info
+      ? sessionLabelWithRuntime(detail || sid, detail ? [detail] : sessionsCache)
+      : sessionLabel(sid, sessionsCache)
+    const nodes = [header, ...formatMessageNodes(messages)]
     const outs = await buildMarkdownOutputs(this.config?.markdown_output, nodes, nodesToMarkdown(nodes))
     for (const out of outs) await this.reply(out)
     await this.replyGeneratedImages(sid, collectGeneratedImagesFromMessages(messages))

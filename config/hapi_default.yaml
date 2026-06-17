@@ -24,6 +24,9 @@ summary_msg_count: 5
 # 推送 AI 回复的输出方式：text 仅文字 / image 仅图片 / both 图片+文字
 markdown_output: "text"
 
+# 是否展示更多 session 信息。开启后，每次完成对话会额外通信获取最新权限/模型/思考强度
+more_session_info: false
+
 # 是否将分节点合并转发合并为单节点转发（仍按字数上限自动分隔）
 # 用于微信 OC 等不支持合并转发、会降级逐条发送且单周期消息条数有限的适配器
 merge_forward_single_node: false

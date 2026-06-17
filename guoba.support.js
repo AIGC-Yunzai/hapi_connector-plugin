@@ -190,6 +190,12 @@ export function supportGuoba() {
           bottomHelpMessage: '推送 AI 回复（SSE 推送与 #hapi msg）的输出方式：仅文字 / 仅 Markdown 图片 / 两者都发。「仅图片」渲染失败时会自动回退为文字',
         },
         {
+          field: 'more_session_info',
+          label: '更多session信息',
+          component: 'Switch',
+          bottomHelpMessage: '开启后，将在每次完成对话后额外通信获取更多session信息',
+        },
+        {
           field: 'merge_forward_single_node',
           label: '合并为单节点转发',
           component: 'Switch',

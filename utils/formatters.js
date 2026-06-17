@@ -266,7 +266,7 @@ function formatRequestFull(req) {
  * @returns {string[]} 节点字符串数组
  */
 export function formatRequestNodes(sid, req, total, sessions, config = {}) {
-  const label = sessionLabelWithRuntime(sid, sessions)
+  const label = config?.more_session_info ? sessionLabelWithRuntime(sid, sessions) : sessionLabel(sid, sessions)
   const question = isQuestionRequest(req)
   const cmdLines = [
     `当前共 ${total} 个待审批`,
