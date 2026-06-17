@@ -346,7 +346,7 @@ export function helpNodes(topic = '', config = {}) {
       '#hapi rename <标题>     重命名当前 session',
       '#hapi delete [目标]     删除 session',
       '#hapi trim <数量>       删除倒数 N 个已关闭会话',
-      '#hapi clean [路径] confirm 清理 inactive sessions',
+      '#hapi clean [路径]      删除已关闭会话（交互选择）',
     ].join('\n'),
     [
       '文件操作',

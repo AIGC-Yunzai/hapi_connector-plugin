@@ -137,7 +137,7 @@ access_token: "your-token"
 #hapi rename <新标题>                            重命名当前 session
 #hapi delete [序号|ID前缀]                       删除 session
 #hapi trim <数量>                               删除倒数 N 个已关闭会话
-#hapi clean [路径前缀] confirm                   清理 inactive sessions
+#hapi clean [路径前缀]                          删除已关闭会话（交互选择）
 ```
 
 `#hapi create` 不带完整参数时会进入分步向导模式。

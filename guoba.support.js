@@ -54,7 +54,7 @@ export function supportGuoba() {
     helpItem('rename', '重命名当前 session', '#hapi rename <新标题>'),
     helpItem('delete', '删除 session', '#hapi delete [目标]'),
     helpItem('trim', '删除倒数 N 个已关闭会话', '#hapi trim <数量>', '用于快速清理旧的已关闭会话，会通过合并转发展示待删除列表并要求确认'),
-    helpItem('clean', '清理 inactive sessions', '#hapi clean [路径] confirm'),
+    helpItem('clean', '删除已关闭会话', '#hapi clean [路径]', '会列出符合条件的已关闭会话，发送序号（支持多选、区间如 1-3、或 all）选择要删除的会话'),
     helpDivider('文件操作'),
     helpItem('files', '浏览远端目录（-l 同时显示大小）', '#hapi files [路径]  /  #hapi files -l [路径]'),
     helpItem('find', '搜索远端文件', '#hapi find <关键词>'),

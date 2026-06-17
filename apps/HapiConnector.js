@@ -24,7 +24,6 @@ import {
   formatFiles,
   formatMessageNodes,
   formatPending,
-  formatSessionList,
   formatSessionListNodes,
   formatSessionStatus,
   helpNodes,
@@ -347,7 +346,7 @@ export class HapiConnector extends plugin {
     if (arg.trim().toLowerCase() === 'all') {
       return this.replySessionList(sessionsCache, current)
     }
-    const visible = State.visibleSessions(e, sessionsCache)
+    const visible = State.visibleSessions(e, sessionsCache).filter(s => s.active || s.thinking)
     return this.replySessionList(visible, current, sessionsCache)
   }
 
@@ -682,7 +681,30 @@ export class HapiConnector extends plugin {
   async cmdTrim(e, arg) {
     await this.refreshSessions()
     const n = parseInt(arg)
-    if (!n || n <= 0) return this.reply('用法：#hapi trim <数量>\n删除倒数的 N 个已关闭会话')
+    if (!n || n <= 0) {
+      // 没有给出有效数量时，用合并转发分节点展示已关闭会话和用法说明
+      const inactiveSessions = sessionsCache.filter(session => !session.active)
+      if (!inactiveSessions.length) {
+        return this.reply('没有已关闭的会话\n\n用法：#hapi trim <数量>\n删除倒数的 N 个已关闭会话')
+      }
+      const total = inactiveSessions.length
+      const nodes = [
+        `用法：#hapi trim <数量>\n删除倒数的 N 个已关闭会话\n\n当前共 ${total} 个已关闭会话：`,
+        ...inactiveSessions.map((session, idx) => {
+          const meta = session.metadata || {}
+          const title = meta.summary?.text || meta.name || '(无标题)'
+          const path = meta.path || '(无路径)'
+          const status = session.thinking ? '思考中' : session.active ? '运行中' : '已关闭'
+          return [
+            `目录: ${path}`,
+            `[倒数第 ${total - idx} | ${session.id.slice(0, 8)}] ${title}`,
+            `${status} | ${meta.flavor || '?'}:${session.modelMode || 'default'}`,
+          ].join('\n')
+        }),
+        '发送 #hapi trim <数量> 即可删除「倒数第 1 ~ N」个已关闭会话。',
+      ]
+      return this.reply(nodes)
+    }
 
     // 获取所有已关闭的会话
     const inactiveSessions = sessionsCache.filter(session => !session.active)
@@ -773,27 +795,42 @@ export class HapiConnector extends plugin {
 
   async cmdClean(e, arg) {
     await this.refreshSessions()
-    const parts = splitArgs(arg)
-    const confirm = parts.some(item => ['confirm', 'yes', '确认'].includes(item.toLowerCase()))
-    const pathFilter = parts.filter(item => !['confirm', 'yes', '确认'].includes(item.toLowerCase())).join(' ')
+    const pathFilter = splitArgs(arg)
+      .filter(item => !['confirm', 'yes', '确认'].includes(item.toLowerCase()))
+      .join(' ')
     const targets = sessionsCache.filter(session => {
       if (session.active) return false
       if (!pathFilter) return true
       return String(session.metadata?.path || '').startsWith(pathFilter)
     })
-    if (!targets.length) return this.reply('没有符合条件的 inactive session')
-    if (!confirm) {
-      return this.reply([
-        `将清理 ${targets.length} 个 inactive session:`,
-        formatSessionList(targets, '', sessionsCache),
-        '',
-        `确认执行请发送：#hapi clean${pathFilter ? ` ${pathFilter}` : ''} confirm`,
-      ].join('\n'))
-    }
+    if (!targets.length) return this.reply('没有符合条件的已关闭会话')
+
+    // 像 #hapi list all 一样，用合并转发分节点展示每个会话（含状态）
+    const nodes = [
+      `共 ${targets.length} 个已关闭会话，请选择要删除的会话：`,
+      ...targets.map((session, idx) => {
+        const meta = session.metadata || {}
+        const title = meta.summary?.text || meta.name || '(无标题)'
+        const path = meta.path || '(无路径)'
+        const status = session.thinking ? '思考中' : session.active ? '运行中' : '已关闭'
+        return [
+          `目录: ${path}`,
+          `[${idx + 1} | ${session.id.slice(0, 8)}] ${title}`,
+          `${status} | ${meta.flavor || '?'}:${session.modelMode || 'default'}`,
+        ].join('\n')
+      }),
+      '发送序号选择（多个用空格或逗号分隔，支持区间如 1-3），发送“all”删除全部，发送“取消”退出。',
+    ]
+
+    const input = await this.awaitSettingArg(e, nodes)
+    if (!input) return true
+
+    const selected = parseSessionSelection(input, targets.length).map(idx => targets[idx])
+    if (!selected.length) return this.reply('未识别到有效序号，已取消')
 
     let okCount = 0
     const lines = []
-    for (const session of targets) {
+    for (const session of selected) {
       const [ok, msg] = await ops.deleteSession(this.client, session.id)
       if (ok) {
         okCount += 1
@@ -802,7 +839,7 @@ export class HapiConnector extends plugin {
       lines.push(msg)
     }
     await this.refreshSessions()
-    return this.reply(`清理完成: ${okCount}/${targets.length}\n${lines.join('\n')}`)
+    return this.reply(`删除完成: ${okCount}/${selected.length}\n${lines.join('\n')}`)
   }
 
   async cmdPerm(e, arg) {
@@ -1100,6 +1137,29 @@ function splitArgs(text) {
   let match
   while ((match = re.exec(text))) result.push(match[1] ?? match[2] ?? match[3])
   return result
+}
+
+// 解析用户对编号列表的选择，返回去重排序后的 0-based 下标数组
+// 支持：单个序号、空格/逗号/顿号分隔的多选、区间（如 1-3）、以及 all/全部
+function parseSessionSelection(input, count) {
+  const text = String(input || '').trim().toLowerCase()
+  if (['all', '全部', '所有', '*'].includes(text)) {
+    return Array.from({ length: count }, (_, idx) => idx)
+  }
+  const indices = new Set()
+  const normalized = text.replace(/\s*([-~])\s*/g, '$1')
+  for (const token of normalized.split(/[\s,，、]+/).filter(Boolean)) {
+    const range = token.match(/^(\d+)[-~](\d+)$/)
+    if (range) {
+      let [from, to] = [Number(range[1]), Number(range[2])]
+      if (from > to) [from, to] = [to, from]
+      for (let n = from; n <= to; n++) if (n >= 1 && n <= count) indices.add(n - 1)
+    } else if (/^\d+$/.test(token)) {
+      const n = Number(token)
+      if (n >= 1 && n <= count) indices.add(n - 1)
+    }
+  }
+  return [...indices].sort((a, b) => a - b)
 }
 
 function splitLong(text, size = 3500) {
