@@ -13,6 +13,21 @@ export async function fetchMessages(client, sid, limit = 10) {
   return data.messages || []
 }
 
+export async function fetchGeneratedImage(client, sid, imageId) {
+  try {
+    const res = await client.get(`/api/sessions/${sid}/generated-images/${imageId}`)
+    if (!res.ok) {
+      logger.debug(`[hapi-connector] 获取 generated image 失败: ${res.status}`)
+      return null
+    }
+    const buffer = Buffer.from(await res.arrayBuffer())
+    return buffer
+  } catch (err) {
+    logger.debug(`[hapi-connector] 获取 generated image 异常: ${err.message || err}`)
+    return null
+  }
+}
+
 export async function sendMessage(client, sid, text, attachments = []) {
   const payload = { text }
   if (attachments.length) payload.attachments = attachments

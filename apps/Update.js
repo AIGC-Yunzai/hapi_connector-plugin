@@ -15,7 +15,7 @@ export class hapiUpdate extends plugin {
       priority: 1007,
       rule: [
         {
-          reg: '^#hapi((插件)?(强制)?更新|\\s+update)(\\s*(dev|DEV|main|MAIN))?$',
+          reg: '^#hapi\\s*((插件)?(强制)?更新|update)(\\s+(dev|DEV|main|MAIN))?$',
           fnc: 'update',
           permission: 'master',
         },

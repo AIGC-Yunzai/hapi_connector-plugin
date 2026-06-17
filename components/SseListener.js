@@ -7,6 +7,7 @@ import {
   sessionLabel,
 } from '../utils/formatters.js'
 import { buildMarkdownOutputs, nodesToMarkdown } from '../utils/markdownPic.js'
+import { segment } from 'icqq'
 
 export class SseListener {
   constructor(client, sessions, notify) {
@@ -205,9 +206,11 @@ export class SseListener {
       this.sessionStates[sid] ||= {}
       this.sessionStates[sid].lastSeq = latestSeq
 
-      const visible = messages
-        .filter(item => (item.seq || 0) > oldSeq)
-        .filter(item => ['agent', 'assistant'].includes(item.content?.message?.role || item.content?.role))
+      // 提取文本消息和 generated-image 消息
+      const newMessages = messages.filter(item => (item.seq || 0) > oldSeq)
+      const agentMessages = newMessages.filter(item => ['agent', 'assistant'].includes(item.content?.message?.role || item.content?.role))
+
+      const visible = agentMessages
         .map(item => {
           const text = extractTextPreview(item.content)
           if (!text) return null
@@ -217,6 +220,19 @@ export class SseListener {
         })
         .filter(Boolean)
 
+      const generatedImages = []
+      for (const msg of agentMessages) {
+        // msg.content 可能是 { role: 'agent', content: { type: 'output', data: {...} } }
+        // 或者包装成 { message: { role: 'agent', content: { type: 'output', data: {...} } } }
+        const agentContent = msg.content?.message || msg.content
+        if (agentContent?.content?.type === 'output' && agentContent?.content?.data) {
+          const data = agentContent.content.data
+          if (data && typeof data === 'object' && data.type === 'generated-image' && data.imageId) {
+            generatedImages.push({ imageId: data.imageId, fileName: data.fileName || '图片' })
+          }
+        }
+      }
+
       const count = Number(this.config?.summary_msg_count || 5)
       const picked = this.config?.output_level === 'summary' ? visible.slice(-count) : visible
       if (picked.length) {
@@ -224,6 +240,17 @@ export class SseListener {
         const outs = await buildMarkdownOutputs(this.config?.markdown_output, payload, nodesToMarkdown(payload))
         for (const out of outs) await this.notify(out, sid)
       }
+
+      // 发送 generated-image 图片（单独发送，不放入 markdown 渲染）
+      for (const img of generatedImages) {
+        const buffer = await ops.fetchGeneratedImage(this.client, sid, img.imageId)
+        if (buffer) {
+          await this.notify(segment.image(buffer), sid)
+        } else {
+          logger.debug(`[hapi-connector] 无法获取图片: ${img.imageId}`)
+        }
+      }
+
       // 仅图片模式下不发「会话已完成」文字，避免图片后又跟一句纯文字提示
       if (this.config?.markdown_output !== 'image') {
         await this.notify(`会话已完成，等待新的输入\n${sessionLabel(sid, this.sessions)}`, sid)
