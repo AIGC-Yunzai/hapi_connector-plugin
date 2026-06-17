@@ -124,7 +124,8 @@ access_token: "your-token"
 > {N} 上传附件5份 [内容]     等待 5 个附件后发送到第 N 个 session
 ```
 
-快捷发送、`#hapi chat`、`#hapi chatN`、`#hapi to` 支持同一条消息附带图片/视频/文件等附件，插件会先上传附件到 HAPI，再把附件引用随消息发送。`> 上传附件3张` 会进入等待模式，按提示继续发送附件即可。
+> [!TIP]
+> 快捷发送、`#hapi chat`、`#hapi chatN`、`#hapi to` 支持同一条消息附带图片/视频/文件等附件，插件会先上传附件到 HAPI，再把附件引用随消息发送。`> 上传附件3张` 会进入等待模式，按提示继续发送附件即可。
 
 ### Session 管理
 
@@ -140,17 +141,14 @@ access_token: "your-token"
 #hapi clean [路径前缀]                          删除已关闭会话（交互选择）
 ```
 
-`#hapi create` 不带完整参数时会进入分步向导模式。
+> [!TIP]
+> `#hapi create` 不带完整参数时会进入分步向导模式 _（新手推荐）_
 
-`create` 的完整格式：
+#### `create` 的完整格式：
 
 ```text
 #hapi create <machineId> <目录> <claude|codex|gemini|opencode> [simple|worktree] [模型] [推理强度] [权限模式] [yolo]
-```
-
 示例：
-
-```text
 #hapi create my-pc E:/myrepo/project codex simple yolo high
 #hapi create my-pc E:/myrepo/project claude simple opus high bypassPermissions
 ```
@@ -167,7 +165,8 @@ access_token: "your-token"
 戳一戳机器人              批准全部普通请求
 ```
 
-`#hapi answer` 只用于回答 HAPI agent 发起的 question 请求，不会把内容当作普通聊天消息发送。普通对话请使用 `#hapi chat <内容>`、`#hapi chatN <内容>`、`#hapi to <序号> <内容>` 或快捷发送。
+> [!TIP]
+> `#hapi answer` 只用于回答 HAPI agent 发起的 question 请求，不会把内容当作普通聊天消息发送。普通对话请使用 `#hapi chat <内容>`、`#hapi chatN <内容>`、`#hapi to <序号> <内容>` 或快捷发送。
 
 ### 文件操作
 
@@ -196,13 +195,7 @@ access_token: "your-token"
 #hapi routes              查看 session 推送路由
 ```
 
-SSE 推送级别：
-
-```text
-silence / simple / summary / detail
-```
-
-插件维护：
+### 插件维护
 
 ```text
 #hapi更新
@@ -210,7 +203,7 @@ silence / simple / summary / detail
 
 ## TODO
 
-- [x] 云崽不同适配器对文件发送/接收能力有差异，文件上传与下载采用尽量通用的实现；如果某个适配器不支持发送文件，图片仍会优先以图片消息发送，普通文件会回退到 `segment.file`。
+- [x] 若适配器不支持发送文件，图片仍会优先以图片消息发送，普通文件会回退到 `segment.file`。
 
 ## 致谢
 
