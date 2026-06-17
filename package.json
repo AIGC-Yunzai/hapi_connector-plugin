@@ -1,6 +1,6 @@
 {
   "name": "hapi_connector-plugin",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Yunzai plugin for remote HAPI coding sessions",
   "author": "misaka20002,127Wzc",
   "license": "AGPL-3.0-or-later",
