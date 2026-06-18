@@ -8,6 +8,10 @@ export async function fetchSessionDetail(client, sid) {
   return data.session || data
 }
 
+export async function fetchOpencodeModels(client, sid) {
+  return client.requestJson('GET', `/api/sessions/${sid}/opencode-models`)
+}
+
 export async function fetchMessages(client, sid, limit = 10) {
   const data = await client.requestJson('GET', `/api/sessions/${sid}/messages`, { params: { limit } })
   return data.messages || []
