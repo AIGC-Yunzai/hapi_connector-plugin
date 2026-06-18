@@ -1000,16 +1000,16 @@ export class HapiConnector extends plugin {
     if (!sid) return this.reply('请先选择 session')
     const detail = await ops.fetchSessionDetail(this.client, sid)
     const flavor = detail.metadata?.flavor || 'claude'
-    if (!['claude', 'codex'].includes(flavor)) return this.reply('推理强度仅支持 Claude / Codex session')
-    const values = flavor === 'codex' ? CODEX_EFFORTS : CLAUDE_EFFORTS
-    const labels = values.map(item => item || (flavor === 'codex' ? 'inherit' : 'auto'))
+    if (!['claude', 'codex', 'opencode'].includes(flavor)) return this.reply('推理强度仅支持 Claude / Codex / OpenCode session')
+    const values = flavor === 'opencode' ? OPENCODE_EFFORTS : flavor === 'codex' ? CODEX_EFFORTS : CLAUDE_EFFORTS
+    const labels = values.map(item => item || (flavor === 'claude' ? 'auto' : 'inherit'))
     if (!arg) {
       arg = await this.awaitSettingArg(e, `可用推理强度: ${labels.join(', ')}\n请在 120 秒内发送要切换的值，发送“取消”退出`)
       if (!arg) return true
     }
     const lowerArg = String(arg || '').trim().toLowerCase()
     const normalized = ['inherit', 'auto', 'default'].includes(lowerArg) ? '' : lowerArg
-    if (!values.includes(normalized)) return this.reply(`无效值：${arg}`)
+    if (!values.includes(normalized) && !(normalized === '' && values.includes('default'))) return this.reply(`无效值：${arg}`)
     const [, msg] = await ops.setEffort(this.client, sid, normalized, flavor)
     return this.reply(msg)
   }

@@ -79,10 +79,11 @@ export async function setModelMode(client, sid, model) {
 }
 
 export async function setEffort(client, sid, effort, flavor) {
-  const route = flavor === 'codex' ? 'model-reasoning-effort' : 'effort'
-  const key = flavor === 'codex' ? 'modelReasoningEffort' : 'effort'
+  const isModelReasoningEffort = ['codex', 'opencode'].includes(flavor)
+  const route = isModelReasoningEffort ? 'model-reasoning-effort' : 'effort'
+  const key = isModelReasoningEffort ? 'modelReasoningEffort' : 'effort'
   const res = await client.post(`/api/sessions/${sid}/${route}`, { json: { [key]: effort || null } })
-  const label = effort || (flavor === 'codex' ? '继承默认' : 'auto')
+  const label = effort || (isModelReasoningEffort ? '继承默认' : 'auto')
   if (res.ok) return [true, `推理强度已切换为: ${label}`]
   return [false, `切换失败: ${res.status} ${(await res.text()).slice(0, 200)}`]
 }
