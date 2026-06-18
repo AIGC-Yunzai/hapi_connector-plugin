@@ -80,21 +80,13 @@ access_token: "your-token"
 
 改完连接配置后重启云崽，让 SSE 监听和运行时缓存完整生效。
 
-## 指令前缀
+## 必备指令
 
 所有 HAPI 指令同时支持 `/hapi` 和 `#hapi`：
 
 ```text
-/hapi list
-#hapi list
 #hapi help
 #hapi帮助
-```
-
-快捷发送默认使用 `>`：
-
-```text
-> 继续刚才的任务
 ```
 
 > [!IMPORTANT]
