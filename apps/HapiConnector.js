@@ -883,6 +883,31 @@ export class HapiConnector extends plugin {
     if (!sid) return this.reply('请先选择 session')
     const detail = await ops.fetchSessionDetail(this.client, sid)
     const flavor = detail.metadata?.flavor || 'claude'
+    if (flavor === 'codex') {
+      let data
+      try {
+        data = await ops.fetchCodexModels(this.client, sid)
+      } catch (err) {
+        return this.reply(`获取 Codex 模型失败: ${err.message || err}`)
+      }
+      if (!data?.success) return this.reply(`获取 Codex 模型失败: ${data?.error || '未知错误'}`)
+
+      const models = normalizeCodexModels(data.models)
+      if (!models.length) return this.reply('Codex 未返回可用模型列表')
+
+      const choices = formatCodexModelChoices(models)
+      const currentModel = detail.modelMode || models.find(model => model.isDefault)?.id || 'default'
+      if (!arg) {
+        arg = await this.awaitSettingArg(e, `当前模型: ${currentModel}\n可用:\n${choices}\n请在 120 秒内发送要切换的模型编号或完整 modelId，发送“取消”退出`)
+        if (!arg) return true
+      }
+
+      const target = resolveCodexModelChoice(arg, models)
+      if (!target) return this.reply(`无效模型：${arg}\n可用:\n${choices}`)
+      const [, msg] = await ops.setModelMode(this.client, sid, target)
+      return this.reply(msg)
+    }
+
     if (flavor === 'opencode') {
       let data
       try {
@@ -909,7 +934,7 @@ export class HapiConnector extends plugin {
     }
 
     const modes = flavor === 'gemini' ? GEMINI_MODEL_MODES : MODEL_MODES
-    if (!['claude', 'gemini'].includes(flavor)) return this.reply('模型切换仅支持 Claude / Gemini / OpenCode session')
+    if (!['claude', 'gemini'].includes(flavor)) return this.reply('模型切换仅支持 Claude / Gemini / Codex / OpenCode session')
     if (!arg) {
       arg = await this.awaitSettingArg(e, `当前模型: ${detail.modelMode || 'default'}\n可用: ${modes.join(', ')}\n请在 120 秒内发送要切换的模型，发送“取消”退出`)
       if (!arg) return true
@@ -1323,6 +1348,38 @@ function resolveChoice(input, values, options = {}) {
   if (/^\d+$/.test(raw)) return values[Number(raw) - 1]
   const normalized = options.model ? normalizeModelInput(raw) : raw
   return values.find(item => item.toLowerCase() === normalized.toLowerCase()) ?? normalized
+}
+
+function normalizeCodexModels(models) {
+  if (!Array.isArray(models)) return []
+  const seen = new Set()
+  const out = []
+  for (const item of models) {
+    const id = String(item?.id || '').trim()
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    const displayName = String(item?.displayName || '').trim()
+    out.push({
+      id,
+      displayName: displayName && displayName !== id ? displayName : '',
+      isDefault: item?.isDefault === true,
+    })
+  }
+  return out
+}
+
+function formatCodexModelChoices(models) {
+  return models.map((model, idx) => {
+    const label = model.displayName ? `${model.displayName} (${model.id})` : model.id
+    const suffix = model.isDefault ? ' [default]' : ''
+    return `${idx + 1}. ${label}${suffix}`
+  }).join('\n')
+}
+
+function resolveCodexModelChoice(input, models) {
+  const raw = String(input || '').trim()
+  if (/^\d+$/.test(raw)) return models[Number(raw) - 1]?.id || ''
+  return models.find(model => model.id === raw)?.id || ''
 }
 
 function normalizeOpencodeModels(models) {
