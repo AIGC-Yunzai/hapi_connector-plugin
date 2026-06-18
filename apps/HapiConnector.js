@@ -958,8 +958,13 @@ export class HapiConnector extends plugin {
   }
 
   async cmdBind(e, arg) {
-    const action = arg.trim().toLowerCase()
+    const parts = splitArgs(arg)
+    const action = (parts[0] || '').toLowerCase()
+    const cleanTarget = (parts[1] || '').toLowerCase()
     if (!action) {
+      return this.reply('用法：#hapi bind <claude|codex|gemini|opencode|all|status|reset> / #hapi bind clean <all|claude|codex|gemini|opencode>')
+    }
+    if (action === 'all') {
       State.bindPrimary(e)
       return this.reply('已设置当前聊天为默认通知窗口\n所有未绑定的Hapi session都将推送到此窗口')
     }
@@ -972,11 +977,19 @@ export class HapiConnector extends plugin {
       return this.reply('已清空当前窗口的 session 绑定和窗口状态')
     }
     if (action === 'clean') {
-      State.cleanFlavorBindings(e)
-      return this.reply('已清除当前用户的 flavor 默认通知窗口配置')
+      const flavors = ['claude', 'codex', 'gemini', 'opencode']
+      if (!cleanTarget || parts.length > 2 || !['all', ...flavors].includes(cleanTarget)) {
+        return this.reply('用法：#hapi bind clean <all|claude|codex|gemini|opencode>')
+      }
+      if (cleanTarget === 'all') {
+        State.cleanDefaultBindings(e)
+        return this.reply('已清除当前用户的所有默认通知窗口配置')
+      }
+      State.cleanFlavorBinding(e, cleanTarget)
+      return this.reply(`已清除当前用户的 ${cleanTarget} 默认通知窗口配置`)
     }
     if (action === 'status') return this.cmdRoutes(e)
-    return this.reply('用法：#hapi bind [claude|codex|gemini|opencode|status|reset|clean]')
+    return this.reply('用法：#hapi bind <claude|codex|gemini|opencode|all|status|reset> / #hapi bind clean <all|claude|codex|gemini|opencode>')
   }
 
   async cmdRoutes(e) {

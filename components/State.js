@@ -105,10 +105,24 @@ class State {
     this.save()
   }
 
-  cleanFlavorBindings(e) {
+  cleanDefaultBindings(e) {
     const user = this.userKey(e)
-    if (!this.data.users[user]?.flavorPrimaryWindows) return false
+    if (!this.data.users[user]) return false
+    const hadPrimary = Boolean(this.data.users[user].primaryWindow)
+    const hadFlavor = Boolean(this.data.users[user].flavorPrimaryWindows)
+    delete this.data.users[user].primaryWindow
     delete this.data.users[user].flavorPrimaryWindows
+    this.save()
+    return hadPrimary || hadFlavor
+  }
+
+  cleanFlavorBinding(e, flavor) {
+    const user = this.userKey(e)
+    if (!this.data.users[user]?.flavorPrimaryWindows?.[flavor]) return false
+    delete this.data.users[user].flavorPrimaryWindows[flavor]
+    if (!Object.keys(this.data.users[user].flavorPrimaryWindows).length) {
+      delete this.data.users[user].flavorPrimaryWindows
+    }
     this.save()
     return true
   }
