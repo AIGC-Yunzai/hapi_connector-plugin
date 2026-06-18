@@ -20,6 +20,7 @@ import {
   CODEX_EFFORTS,
   GEMINI_MODEL_MODES,
   MODEL_MODES,
+  OPENCODE_EFFORTS,
   PERMISSION_MODES,
   formatDirectory,
   formatFiles,
@@ -507,6 +508,7 @@ export class HapiConnector extends plugin {
     if (!sessionType) return true
 
     const flavor = agent.toLowerCase()
+    const selectedMachineId = machineIdOf(machine)
     const createOptions = {
       sessionType,
       yolo: false,
@@ -520,9 +522,13 @@ export class HapiConnector extends plugin {
       const model = await this.awaitChoiceArg(e, `请选择模型，发送“跳过”使用默认：\n${modelModes.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`, modelModes, '', '')
       if (model === null) return true
       createOptions.model = model
+    } else if (['codex', 'opencode'].includes(flavor)) {
+      const model = await this.awaitCreateDynamicModel(e, flavor, selectedMachineId, directory)
+      if (model === null) return true
+      createOptions.model = model
     }
 
-    const efforts = flavor === 'codex' ? CODEX_EFFORTS : flavor === 'claude' ? CLAUDE_EFFORTS : []
+    const efforts = flavor === 'opencode' ? OPENCODE_EFFORTS : flavor === 'codex' ? CODEX_EFFORTS : flavor === 'claude' ? CLAUDE_EFFORTS : []
     if (efforts.length) {
       const labels = efforts.map(item => item || (flavor === 'codex' ? 'inherit' : 'auto'))
       const effort = await this.awaitChoiceArg(e, `请选择推理强度，发送“跳过”使用默认：\n${labels.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`, labels, '', '')
@@ -538,7 +544,7 @@ export class HapiConnector extends plugin {
       if (permission === 'yolo') createOptions.yolo = true
     }
 
-    return this.createSession(e, machineIdOf(machine), directory, agent, createOptions)
+    return this.createSession(e, selectedMachineId, directory, agent, createOptions)
   }
 
   async createSession(e, machineId, directory, agent, createOptions) {
@@ -550,7 +556,7 @@ export class HapiConnector extends plugin {
       yolo: createOptions.yolo,
     }
     if (createOptions.model && createOptions.model !== 'default') payload.model = createOptions.model
-    if (createOptions.effort && flavor === 'codex') payload.modelReasoningEffort = createOptions.effort
+    if (createOptions.effort && ['codex', 'opencode'].includes(flavor)) payload.modelReasoningEffort = createOptions.effort
     if (createOptions.effort && flavor === 'claude') payload.effort = createOptions.effort
     const [ok, msg, sid] = await ops.spawnSession(this.client, machineId, payload)
     await this.reply(msg)
@@ -654,6 +660,50 @@ export class HapiConnector extends plugin {
       const target = resolveChoice(input, values, { model: true })
       if (values.includes(target)) return target
       await this.reply(`无效输入：${input}\n可用: ${values.join(', ')}${fallback !== null ? '\n发送“跳过”使用默认值。' : ''}`)
+    }
+  }
+
+  async awaitCreateDynamicModel(e, flavor, machineId, directory) {
+    const isCodex = flavor === 'codex'
+    const label = isCodex ? 'Codex' : 'OpenCode'
+    const idLabel = isCodex ? 'model id' : 'modelId'
+    const normalize = isCodex ? normalizeCodexModels : normalizeOpencodeModels
+    const format = isCodex ? formatCodexModelChoices : formatOpencodeModelChoices
+    const resolve = isCodex ? resolveCodexModelChoice : resolveOpencodeModelChoice
+
+    let models = []
+    let error = ''
+    try {
+      const data = isCodex
+        ? await ops.fetchMachineCodexModels(this.client, machineId)
+        : await ops.fetchMachineOpencodeModels(this.client, machineId, directory)
+      if (data?.success) {
+        models = normalize(isCodex ? data.models : data.availableModels)
+      } else {
+        error = data?.error || '未知错误'
+      }
+    } catch (err) {
+      error = err.message || String(err)
+    }
+
+    const choices = models.length ? format(models) : ''
+    const prompt = models.length
+      ? `请选择 ${label} 模型，发送“跳过”使用默认：\n${choices}`
+      : [
+          `获取 ${label} 模型列表失败: ${error || '未返回可用模型'}`,
+          `可直接发送完整 ${idLabel}，或发送“跳过”使用默认：`,
+        ].join('\n')
+
+    while (true) {
+      const input = await this.awaitSettingArg(e, prompt)
+      if (!input) return null
+      if (isSkipText(input)) return ''
+
+      if (!models.length) return input
+
+      const target = resolve(input, models)
+      if (target) return target
+      await this.reply(`无效模型：${input}\n可用:\n${choices}\n发送“跳过”使用默认值。`)
     }
   }
 
@@ -986,12 +1036,12 @@ export class HapiConnector extends plugin {
       const [, msg] = await ops.setCollaborationMode(this.client, sid, next)
       return this.reply(msg)
     }
-    if (flavor === 'claude') {
+    if (['claude', 'opencode'].includes(flavor)) {
       const next = detail.permissionMode === 'plan' ? 'default' : 'plan'
       const [, msg] = await ops.setPermissionMode(this.client, sid, next)
       return this.reply(msg)
     }
-    return this.reply('Plan 模式仅支持 Claude / Codex session')
+    return this.reply('Plan 模式仅支持 Claude / Codex / OpenCode session')
   }
 
   async cmdOutput(e, arg) {
@@ -1524,8 +1574,9 @@ function normalizeModelInput(input) {
 function parseCreateOptions(agent, tokens = []) {
   const flavor = String(agent || '').toLowerCase()
   const modelModes = flavor === 'gemini' ? GEMINI_MODEL_MODES : flavor === 'claude' ? MODEL_MODES : []
-  const efforts = flavor === 'codex' ? CODEX_EFFORTS : flavor === 'claude' ? CLAUDE_EFFORTS : []
+  const efforts = flavor === 'opencode' ? OPENCODE_EFFORTS : flavor === 'codex' ? CODEX_EFFORTS : flavor === 'claude' ? CLAUDE_EFFORTS : []
   const permissionModes = PERMISSION_MODES[flavor] || []
+  const acceptsFreeModel = ['codex', 'opencode'].includes(flavor)
   const options = {
     sessionType: 'simple',
     yolo: false,
@@ -1544,19 +1595,29 @@ function parseCreateOptions(agent, tokens = []) {
       options.yolo = true
       continue
     }
-    const model = resolveChoice(token, modelModes, { model: true })
-    if (modelModes.includes(model)) {
-      options.model = model
-      continue
+
+    if (modelModes.length) {
+      const model = resolveChoice(token, modelModes, { model: true })
+      if (modelModes.includes(model)) {
+        options.model = model
+        continue
+      }
     }
+
     const effort = ['inherit', 'auto', 'default'].includes(lower) ? '' : lower
-    if (efforts.includes(effort)) {
+    if (efforts.includes(effort) || (lower === 'default' && efforts.includes('default'))) {
       options.effort = effort
       continue
     }
+
     const permission = resolveChoice(token, permissionModes)
     if (permissionModes.includes(permission)) {
       options.permission = permission
+      continue
+    }
+
+    if (acceptsFreeModel && !options.model) {
+      options.model = token
     }
   }
 

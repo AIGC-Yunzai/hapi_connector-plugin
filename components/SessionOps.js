@@ -16,6 +16,14 @@ export async function fetchCodexModels(client, sid) {
   return client.requestJson('GET', `/api/sessions/${sid}/codex-models`)
 }
 
+export async function fetchMachineCodexModels(client, machineId) {
+  return client.requestJson('GET', `/api/machines/${machineId}/codex-models`)
+}
+
+export async function fetchMachineOpencodeModels(client, machineId, cwd) {
+  return client.requestJson('GET', `/api/machines/${machineId}/opencode-models`, { params: { cwd } })
+}
+
 export async function fetchMessages(client, sid, limit = 10) {
   const data = await client.requestJson('GET', `/api/sessions/${sid}/messages`, { params: { limit } })
   return data.messages || []

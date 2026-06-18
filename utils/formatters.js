@@ -2,13 +2,14 @@ export const PERMISSION_MODES = {
   claude: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
   codex: ['default', 'read-only', 'safe-yolo', 'yolo'],
   gemini: ['default', 'read-only', 'safe-yolo', 'yolo'],
-  opencode: ['default', 'yolo'],
+  opencode: ['default', 'plan', 'yolo'],
 }
 
 export const MODEL_MODES = ['default', 'sonnet', 'sonnet[1m]', 'opus', 'opus[1m]', 'fable', 'fable[1m]']
 export const GEMINI_MODEL_MODES = ['default', 'flash', 'pro']
 export const CLAUDE_EFFORTS = ['', 'medium', 'high', 'max']
 export const CODEX_EFFORTS = ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh']
+export const OPENCODE_EFFORTS = ['default', 'low', 'medium', 'high', 'max']
 
 export function extractTextPreview(content, maxLen = 0) {
   const limit = maxLen > 0 ? maxLen : 999999
