@@ -347,14 +347,16 @@ export class HapiConnector extends plugin {
     await this.refreshSessions()
     const current = State.currentSid(e)
     if (arg.trim().toLowerCase() === 'all') {
-      return this.replySessionList(sessionsCache, current)
+      return this.replySessionList(e, sessionsCache, current)
     }
     const visible = State.visibleSessions(e, sessionsCache).filter(s => s.active || s.thinking)
-    return this.replySessionList(visible, current, sessionsCache)
+    return this.replySessionList(e, visible, current, sessionsCache)
   }
 
-  replySessionList(sessions, current, allSessions = null) {
-    return this.reply(formatSessionListNodes(sessions, current, allSessions))
+  replySessionList(e, sessions, current, allSessions = null) {
+    return this.reply(formatSessionListNodes(sessions, current, allSessions, {
+      routeLabel: session => State.formatRouteForSession(session, e),
+    }))
   }
 
   async cmdSwitch(e, target) {
@@ -959,7 +961,7 @@ export class HapiConnector extends plugin {
     const action = arg.trim().toLowerCase()
     if (!action) {
       State.bindPrimary(e)
-      return this.reply('已设置当前聊天为默认通知窗口')
+      return this.reply('已设置当前聊天为默认通知窗口\n所有未绑定的Hapi session都将推送到此窗口')
     }
     if (['claude', 'codex', 'gemini', 'opencode'].includes(action)) {
       State.bindPrimary(e, action)
@@ -969,16 +971,19 @@ export class HapiConnector extends plugin {
       State.resetBindings(e)
       return this.reply('已清空当前窗口的 session 绑定和窗口状态')
     }
+    if (action === 'clean') {
+      State.cleanFlavorBindings(e)
+      return this.reply('已清除当前用户的 flavor 默认通知窗口配置')
+    }
     if (action === 'status') return this.cmdRoutes(e)
-    return this.reply('用法：#hapi bind [claude|codex|gemini|opencode|status|reset]')
+    return this.reply('用法：#hapi bind [claude|codex|gemini|opencode|status|reset|clean]')
   }
 
-  async cmdRoutes() {
+  async cmdRoutes(e) {
     await this.refreshSessions()
     const lines = ['HAPI 通知路由:']
     for (const session of sessionsCache) {
-      const win = State.windowForSession(session)
-      lines.push(`${session.id.slice(0, 8)} ${session.metadata?.flavor || '?'} -> ${State.formatWindowKey(win)}`)
+      lines.push(`${session.id.slice(0, 8)} ${session.metadata?.flavor || '?'} -> ${State.formatRouteForSession(session, e)}`)
     }
     return this.reply(lines.join('\n'))
   }

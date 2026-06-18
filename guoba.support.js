@@ -68,7 +68,7 @@ export function supportGuoba() {
     helpItem('effort', '查看 / 切换推理强度', '#hapi effort [值]'),
     helpItem('plan', '切换 Plan 模式', '#hapi plan'),
     helpItem('output', '查看 / 切换 SSE 推送级别', '#hapi output [级别]'),
-    helpItem('bind', '设置 / 查看 / 清除默认通知窗口', '#hapi bind [flavor]  /  status  /  reset'),
+    helpItem('bind', '默认通知窗口', '#hapi bind status  /  reset  /  clean', '设置 / 查看 / 清除默认通知窗口；所有未绑定的Hapi session都将推送到此窗口'),
     helpItem('routes', '查看 session 推送路由', '#hapi routes'),
     helpItem('help', '查看完整帮助', '#hapi help / #hapi帮助',),
     helpItem('update', '更新 / 强制更新插件', '#hapi更新  /  #hapi强制更新'),

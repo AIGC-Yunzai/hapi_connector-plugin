@@ -113,10 +113,11 @@ function isPlanSession(session) {
   return session.permissionMode === 'plan' || session.collaborationMode === 'plan'
 }
 
-export function formatSessionList(sessions, currentSid = '', allSessions = null) {
+export function formatSessionList(sessions, currentSid = '', allSessions = null, options = {}) {
   if (!sessions.length) return '没有任何 session'
   const indexBySid = new Map()
   ;(allSessions || sessions).forEach((item, idx) => indexBySid.set(item.id, idx + 1))
+  const routeLabel = typeof options.routeLabel === 'function' ? options.routeLabel : null
 
   const lines = [`共 ${sessions.length} 个 Session:`]
   let lastPath = null
@@ -135,15 +136,17 @@ export function formatSessionList(sessions, currentSid = '', allSessions = null)
     const current = currentSid === session.id ? ' | <<当前' : ''
     lines.push(`[${idx} | ${session.id.slice(0, 8)}] ${title}`)
     lines.push(`${status} | ${meta.flavor || '?'}:${session.modelMode || 'default'}${pending}${current}`)
+    if (routeLabel) lines.push(`推送: ${routeLabel(session)}`)
   }
   lines.push('', '切换会话：\n #hapi sw <序号或ID前缀>')
   return lines.join('\n')
 }
 
-export function formatSessionListNodes(sessions, currentSid = '', allSessions = null) {
+export function formatSessionListNodes(sessions, currentSid = '', allSessions = null, options = {}) {
   if (!sessions.length) return ['没有任何 session']
   const indexBySid = new Map()
   ;(allSessions || sessions).forEach((item, idx) => indexBySid.set(item.id, idx + 1))
+  const routeLabel = typeof options.routeLabel === 'function' ? options.routeLabel : null
 
   const pathCounts = new Map()
   for (const session of sessions) {
@@ -160,11 +163,13 @@ export function formatSessionListNodes(sessions, currentSid = '', allSessions = 
     const status = session.thinking ? '思考中' : session.active ? '运行中' : '已关闭'
     const pending = session.pendingRequestsCount ? ` | ${session.pendingRequestsCount} 待审批` : ''
     const current = currentSid === session.id ? ' | <<当前' : ''
-    nodes.push([
+    const lines = [
       `目录: ${path} (${pathCounts.get(path) || 1})`,
       `[${indexBySid.get(session.id)} | ${session.id.slice(0, 8)}] ${title}`,
       `${status} | ${meta.flavor || '?'}:${session.modelMode || 'default'}${pending}${current}`,
-    ].join('\n'))
+    ]
+    if (routeLabel) lines.push(`推送: ${routeLabel(session)}`)
+    nodes.push(lines.join('\n'))
   }
 
   // 检查运行中的会话数量，如果 >= 4 个则添加提醒
@@ -417,9 +422,10 @@ export function helpNodes(topic = '', config = {}) {
       '#hapi effort [值]       查看/切换推理强度',
       '#hapi plan              切换 Plan 模式',
       '#hapi output [级别]     查看/切换推送级别，不带值会等待下一条消息',
-      '#hapi bind [flavor]     设置默认通知窗口',
+      '#hapi bind              设置默认通知窗口',
       '#hapi bind status       查看通知路由',
       '#hapi bind reset        清除当前窗口绑定',
+      '#hapi bind clean        清除默认通知窗口',
       '#hapi routes            查看通知路由',
       '#hapi更新              更新插件',
       '#hapi强制更新          强制更新插件',

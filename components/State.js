@@ -105,6 +105,14 @@ class State {
     this.save()
   }
 
+  cleanFlavorBindings(e) {
+    const user = this.userKey(e)
+    if (!this.data.users[user]?.flavorPrimaryWindows) return false
+    delete this.data.users[user].flavorPrimaryWindows
+    this.save()
+    return true
+  }
+
   visibleSessions(e, sessions) {
     const key = this.windowKey(e)
     const user = this.data.users[this.userKey(e)] || {}
@@ -137,6 +145,31 @@ class State {
       if (user.primaryWindow) return user.primaryWindow
     }
     return ''
+  }
+
+  routeForSession(session, e = null) {
+    const sid = session?.id
+    if (!sid) return { key: '', isDefault: false }
+    const owner = this.data.sessionOwners[sid]
+    if (owner) return { key: owner, isDefault: false }
+
+    const flavor = session.metadata?.flavor || ''
+    const user = e ? this.data.users[this.userKey(e)] || {} : null
+    if (user) {
+      if (flavor && user.flavorPrimaryWindows?.[flavor]) {
+        return { key: user.flavorPrimaryWindows[flavor], isDefault: true }
+      }
+      if (user.primaryWindow) return { key: user.primaryWindow, isDefault: true }
+      return { key: '', isDefault: false }
+    }
+
+    const key = this.windowForSession(session)
+    return { key, isDefault: Boolean(key) }
+  }
+
+  formatRouteForSession(session, e = null) {
+    const route = this.routeForSession(session, e)
+    return `${this.formatWindowKey(route.key)}${route.isDefault ? '（默认通知窗口）' : ''}`
   }
 
   formatWindowKey(key) {

@@ -192,6 +192,7 @@ access_token: "your-token"
 #hapi bind codex          设置 Codex 默认通知窗口
 #hapi bind status         查看路由
 #hapi bind reset          清除当前窗口绑定
+#hapi bind clean          清除 flavor 默认通知窗口
 #hapi routes              查看 session 推送路由
 ```
 
