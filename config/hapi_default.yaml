@@ -56,10 +56,9 @@ enable_sse: true
 # 小功能
 delay_yolo_mode: false
 
-# 命中这些 HAPI/API 报错字符串后，等待 1 分钟自动发送 continue 重试（大小写敏感）
+# 命中 HAPI system-event 文本后，等待 1 分钟自动发送 continue 重试（大小写敏感）
+# 仅匹配原始消息结构中的 session event message，不匹配 assistant 正文或 api_error/error 字段
 retry_error_strings:
-  - "API Error"
-  - "API error"
   - "Task failed"
 retry_max_count: 10
 

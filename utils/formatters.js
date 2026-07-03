@@ -1,3 +1,5 @@
+import { formatHapiMessageNodes } from './hapiMessages.js'
+
 export const PERMISSION_MODES = {
   claude: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
   codex: ['default', 'read-only', 'safe-yolo', 'yolo'],
@@ -206,29 +208,12 @@ export function formatSessionStatus(session) {
 
 export function formatMessages(messages) {
   if (!messages.length) return '(暂无消息)'
-  const lines = []
-  for (const msg of messages) {
-    const content = msg.content || {}
-    const role = content.message?.role || content.role || '?'
-    const text = extractTextPreview(content)
-    if (!text) continue
-    lines.push(`${role}: ${text}`)
-  }
+  const lines = formatHapiMessageNodes(messages).map(node => node.replace('\n', ': '))
   return lines.join('\n\n') || '(暂无可显示的消息)'
 }
 
 export function formatMessageNodes(messages) {
-  if (!messages.length) return ['(暂无消息)']
-  const nodes = []
-  for (const msg of messages) {
-    const content = msg.content || {}
-    const role = content.message?.role || content.role || '?'
-    const text = extractTextPreview(content)
-    if (!text) continue
-    const seq = msg.seq ? ` #${msg.seq}` : ''
-    nodes.push(`${role}${seq}\n${text}`)
-  }
-  return nodes.length ? nodes : ['(暂无可显示的消息)']
+  return formatHapiMessageNodes(messages)
 }
 
 export function isQuestionRequest(req) {

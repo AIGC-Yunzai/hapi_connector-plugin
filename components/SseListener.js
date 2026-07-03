@@ -9,6 +9,12 @@ import {
 } from '../utils/formatters.js'
 import { buildMarkdownOutputs, nodesToMarkdown } from '../utils/markdownPic.js'
 import { collectGeneratedImagesFromMessages, imageSegmentFromBuffer } from '../utils/generatedImages.js'
+import {
+  formatClassifiedMessage,
+  classifyHapiMessages,
+  messageRole,
+  sessionEventRetryText,
+} from '../utils/hapiMessages.js'
 
 function retryDelayMs(config = {}) {
   const minutes = Number(config.retry_delay_minutes ?? 1)
@@ -32,10 +38,6 @@ function retryMaxCount(config = {}) {
   const value = Number(config.retry_max_count ?? 10)
   if (!Number.isFinite(value)) return 10
   return Math.max(0, Math.floor(value))
-}
-
-function messageRole(content) {
-  return content?.message?.role || content?.role || '?'
 }
 
 export class SseListener {
@@ -273,25 +275,18 @@ export class SseListener {
       this.sessionStates[sid] ||= {}
       this.sessionStates[sid].lastSeq = latestSeq
 
-      // 提取文本消息和 generated-image 消息
+      // 提取可见文本消息、系统事件和 generated-image 消息。
       const newMessages = messages.filter(item => (item.seq || 0) > oldSeq)
-      const agentMessages = newMessages.filter(item => ['agent', 'assistant'].includes(messageRole(item.content)))
 
-      this.handleAutoContinueRetry(sid, agentMessages)
+      this.handleAutoContinueRetry(sid, newMessages)
 
       if (this.config?.output_level === 'silence') return
 
-      const visible = agentMessages
-        .map(item => {
-          const text = extractTextPreview(item.content)
-          if (!text) return null
-          const role = messageRole(item.content)
-          const seq = item.seq ? ` #${item.seq}` : ''
-          return `${role}${seq}\n${text}`
-        })
+      const visible = classifyHapiMessages(newMessages, { includeUsers: false })
+        .map(formatClassifiedMessage)
         .filter(Boolean)
 
-      const generatedImages = collectGeneratedImagesFromMessages(agentMessages)
+      const generatedImages = collectGeneratedImagesFromMessages(newMessages)
 
       const count = Number(this.config?.summary_msg_count || 5)
       const picked = this.config?.output_level === 'summary' ? visible.slice(-count) : visible
@@ -321,13 +316,10 @@ export class SseListener {
     }
   }
 
-  handleAutoContinueRetry(sid, agentMessages) {
-    if (!agentMessages.length) return
+  handleAutoContinueRetry(sid, messages) {
+    if (!messages.length) return
 
-    const text = agentMessages
-      .map(item => extractTextPreview(item.content))
-      .filter(Boolean)
-      .join('\n')
+    const text = sessionEventRetryText(messages)
     if (!text) return
 
     const matched = retryErrorStrings(this.config).find(item => text.includes(item))

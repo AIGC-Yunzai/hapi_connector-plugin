@@ -257,11 +257,11 @@ export function supportGuoba() {
         },
         {
           field: 'retry_error_strings',
-          label: '重试报错字符串',
-          bottomHelpMessage: '当 Hapi 的返回命中这些报错字符串（1.包含报错字符串；2.大小写敏感）后，本插件自动发送 continue 重试',
+          label: '系统事件重试字符串',
+          bottomHelpMessage: '仅匹配 HAPI 系统事件 system-event/message 文本，命中后自动发送 continue 重试，大小写敏感',
           component: "GTags",
           componentProps: {
-            placeholder: '请输入API返回的报错字符串',
+            placeholder: '请输入系统事件文本片段',
             allowAdd: true,
             allowDel: true,
             valueParser: ((value) => value.split(',') || []),
