@@ -277,6 +277,7 @@ export function formatRequestNodes(sid, req, total, sessions, config = {}) {
   const cmdLines = [
     `当前共 ${total} 个待审批`,
     question ? `#hapi answer ${req.index} <答案>` : `#hapi allow ${req.index}`,
+    ...(question ? [] : [`#hapi as ${req.index} 本会话允许`]),
     '#hapi a 批准全部普通请求',
     '#hapi deny 拒绝',
   ]
@@ -323,6 +324,7 @@ export function formatPending(pending, sessions) {
   }
   lines.push('', '#hapi a 批准全部普通请求')
   lines.push('#hapi allow <序号> 批准单个普通请求')
+  lines.push('#hapi as <序号> 本会话允许单个普通请求')
   lines.push('#hapi deny [序号] 拒绝请求')
   return lines.join('\n')
 }
@@ -387,6 +389,7 @@ export function helpNodes(topic = '', config = {}) {
       '#hapi pending           查看待审批',
       '#hapi a                 批准全部普通请求',
       '#hapi allow <序号>      批准单个普通请求',
+      '#hapi as <序号>         本会话允许单个普通请求',
       '#hapi answer <序号> <答案> 回答 question 请求，不是普通聊天',
       '#hapi deny [序号]       拒绝全部或单个请求',
       '戳一戳机器人            批准全部普通请求',

@@ -152,6 +152,10 @@ export class HapiConnector extends plugin {
           return this.cmdApprove(e)
         case 'allow':
           return this.cmdAllow(e, arg)
+        case 'as':
+        case 'always':
+        case '本会话允许':
+          return this.cmdAllowSession(e, arg)
         case 'answer':
           return this.cmdAnswer(e, arg)
         case 'deny':
@@ -439,6 +443,15 @@ export class HapiConnector extends plugin {
     if (!item) return this.reply('未找到待审批请求')
     if (isQuestionRequest(item.req)) return this.reply('这是 question 请求，请用\n #hapi answer <序号> <答案>')
     const [, msg] = await ops.approvePermission(this.client, item.sid, item.rid)
+    return this.reply(msg)
+  }
+
+  async cmdAllowSession(e, arg) {
+    const item = this.findPending(arg)
+    if (!item) return this.reply('未找到待审批请求')
+    if (isQuestionRequest(item.req)) return this.reply('这是 question 请求，请用\n #hapi answer <序号> <答案>')
+    const session = await this.pendingSessionDetail(item.sid)
+    const [, msg] = await ops.approvePermissionForSession(this.client, item.sid, item.rid, item.req, session)
     return this.reply(msg)
   }
 
@@ -1202,9 +1215,28 @@ export class HapiConnector extends plugin {
   }
 
   findPending(index) {
-    const idx = Number(String(index || '').trim())
+    const match = String(index || '').trim().match(/^(\d+)(?:\s|$)/)
+    const idx = match ? Number(match[1]) : 0
     if (!idx) return null
     return this.flattenPending().find(item => Number(item.req.index) === idx) || null
+  }
+
+  async pendingSessionDetail(sid) {
+    let session = sessionsCache.find(item => item.id === sid) || null
+    if (session?.metadata?.flavor) return session
+    try {
+      const detail = await ops.fetchSessionDetail(this.client, sid)
+      if (!session) {
+        sessionsCache.push(detail)
+      } else {
+        Object.assign(session, detail, {
+          metadata: { ...(session.metadata || {}), ...(detail.metadata || {}) },
+        })
+      }
+      return detail
+    } catch {
+      return session
+    }
   }
 
   async pushNotification(text, sid) {

@@ -52,18 +52,69 @@ export async function sendMessage(client, sid, text, attachments = []) {
   return [false, `发送失败: ${res.status} ${(await res.text()).slice(0, 200)}`]
 }
 
-export async function approvePermission(client, sid, rid, answers = null) {
+export async function approvePermission(client, sid, rid, options = null) {
+  let json = {}
+  if (options && typeof options === 'object') {
+    const isApproveOptions = Object.prototype.hasOwnProperty.call(options, 'mode')
+      || Object.prototype.hasOwnProperty.call(options, 'allowTools')
+      || Object.prototype.hasOwnProperty.call(options, 'decision')
+      || Object.prototype.hasOwnProperty.call(options, 'answers')
+    json = isApproveOptions ? options : { answers: options }
+  }
   const res = await client.post(`/api/sessions/${sid}/permissions/${rid}/approve`, {
-    json: answers ? { answers } : {},
+    json,
   })
   if (res.ok) return [true, '已批准']
   return [false, `批准失败: ${res.status} ${(await res.text()).slice(0, 200)}`]
+}
+
+export async function approvePermissionForSession(client, sid, rid, req = null, session = null) {
+  const flavor = String(session?.metadata?.flavor || '').toLowerCase()
+  const options = flavor === 'claude'
+    ? buildClaudeAllowForSessionOptions(req)
+    : { decision: 'approved_for_session' }
+  if (!options) return [false, '该请求不支持“本会话允许”，请使用 #hapi allow <序号> 单次批准']
+  const [ok, msg] = await approvePermission(client, sid, rid, options)
+  return [ok, ok ? '本会话已允许' : msg]
 }
 
 export async function denyPermission(client, sid, rid) {
   const res = await client.post(`/api/sessions/${sid}/permissions/${rid}/deny`, { json: {} })
   if (res.ok) return [true, '已拒绝']
   return [false, `拒绝失败: ${res.status} ${(await res.text()).slice(0, 200)}`]
+}
+
+function buildClaudeAllowForSessionOptions(req) {
+  const toolName = String(req?.tool || '').trim()
+  if (!toolName || isClaudeAllowForSessionHidden(toolName)) return null
+  const args = parseRequestArguments(req)
+  const command = toolName === 'Bash' ? String(args?.command || args?.cmd || '').trim() : ''
+  const toolIdentifier = toolName === 'Bash' && command ? `Bash(${command})` : toolName
+  return { allowTools: [toolIdentifier] }
+}
+
+function isClaudeAllowForSessionHidden(toolName) {
+  return [
+    'Edit',
+    'MultiEdit',
+    'Write',
+    'NotebookEdit',
+    'exit_plan_mode',
+    'ExitPlanMode',
+    'CursorCreatePlan',
+  ].includes(toolName)
+}
+
+function parseRequestArguments(req) {
+  const args = req?.arguments
+  if (typeof args === 'string') {
+    try {
+      return JSON.parse(args)
+    } catch {
+      return {}
+    }
+  }
+  return args && typeof args === 'object' ? args : {}
 }
 
 export async function setPermissionMode(client, sid, mode) {

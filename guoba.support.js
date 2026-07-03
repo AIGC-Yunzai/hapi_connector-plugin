@@ -36,6 +36,7 @@ export function supportGuoba() {
     helpItem('pending', '查看待审批', '#hapi pending'),
     helpItem('a', '批准全部普通请求', '#hapi a'),
     helpItem('allow', '批准单个普通请求', '#hapi allow <序号>'),
+    helpItem('allow_session', '本会话允许单个普通请求', '#hapi as <序号>'),
     helpItem('answer', '回答 question 请求', '#hapi answer <序号> <答案>', 'question 请求不是普通聊天，普通对话用 #hapi chat'),
     helpItem('deny', '拒绝全部或单个请求', '#hapi deny [序号]'),
     helpItem('poke', '批准全部普通请求', '戳一戳机器人', '需开启「戳一戳审核」'),

@@ -152,6 +152,7 @@ access_token: "your-token"
 #hapi a                   批准全部普通请求
 #hapi approve             批准全部普通请求
 #hapi allow <序号>        批准单个普通请求
+#hapi as <序号>           本会话允许单个普通请求
 #hapi answer <序号> <答案> 回答 question 请求
 #hapi deny [序号]         拒绝全部或单个请求
 戳一戳机器人              批准全部普通请求
