@@ -9,6 +9,7 @@ function blankState() {
   return {
     windows: {},
     sessionOwners: {},
+    sessions: {},
     users: {},
   }
 }
@@ -60,12 +61,43 @@ class State {
 
   clearSession(sid) {
     delete this.data.sessionOwners[sid]
+    delete this.data.sessions?.[sid]
     for (const win of Object.values(this.data.windows)) {
       if (win.currentSession === sid) {
         delete win.currentSession
         delete win.flavor
       }
     }
+    this.save()
+  }
+
+  getAutoRetryCount(sid) {
+    const value = Number(this.data.sessions?.[sid]?.autoRetryCount || 0)
+    if (!Number.isFinite(value) || value <= 0) return 0
+    return Math.floor(value)
+  }
+
+  setAutoRetryCount(sid, count) {
+    if (!sid) return
+    const value = Number(count)
+    if (!Number.isFinite(value) || value <= 0) {
+      this.clearAutoRetryCount(sid)
+      return
+    }
+    this.data.sessions ||= {}
+    this.data.sessions[sid] = {
+      ...(this.data.sessions[sid] || {}),
+      autoRetryCount: Math.floor(value),
+    }
+    this.save()
+  }
+
+  clearAutoRetryCount(sid) {
+    if (!sid) return
+    const session = this.data.sessions?.[sid]
+    if (!session || session.autoRetryCount === undefined) return
+    delete session.autoRetryCount
+    if (!Object.keys(session).length) delete this.data.sessions[sid]
     this.save()
   }
 

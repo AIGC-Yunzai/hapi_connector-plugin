@@ -90,7 +90,7 @@ export class HapiConnector extends plugin {
       logger.warn(`[hapi-connector] 初始化 session 列表失败: ${err.message || err}`)
     }
     if (this.config.enable_sse) {
-      sharedSse ||= new SseListener(this.client, sessionsCache, this.pushNotification.bind(this))
+      sharedSse ||= new SseListener(this.client, sessionsCache, this.pushNotification.bind(this), State)
       sharedSse.start(this.config)
     }
 
@@ -112,7 +112,7 @@ export class HapiConnector extends plugin {
     this.client.configure(this.config)
     if (sharedSse) sharedSse.config = this.config
     if (this.client.isConfigured() && this.config.enable_sse && !sharedSse) {
-      sharedSse = new SseListener(this.client, sessionsCache, this.pushNotification.bind(this))
+      sharedSse = new SseListener(this.client, sessionsCache, this.pushNotification.bind(this), State)
       sharedSse.start(this.config)
     }
     if (!this.client.isConfigured()) {

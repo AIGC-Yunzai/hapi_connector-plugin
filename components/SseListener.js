@@ -41,10 +41,11 @@ function retryMaxCount(config = {}) {
 }
 
 export class SseListener {
-  constructor(client, sessions, notify) {
+  constructor(client, sessions, notify, stateStore = null) {
     this.client = client
     this.sessions = sessions
     this.notify = notify
+    this.stateStore = stateStore
     this.pending = {}
     this.sessionStates = {}
     this.freeIndices = new Set()
@@ -343,10 +344,37 @@ export class SseListener {
   retryState(sid) {
     let state = this.autoRetry.get(sid)
     if (!state) {
-      state = { count: 0, timer: null, resetCountdown: false }
+      state = { count: this.readAutoRetryCount(sid), timer: null, resetCountdown: false }
       this.autoRetry.set(sid, state)
     }
     return state
+  }
+
+  readAutoRetryCount(sid) {
+    try {
+      const value = Number(this.stateStore?.getAutoRetryCount?.(sid) || 0)
+      if (!Number.isFinite(value) || value <= 0) return 0
+      return Math.floor(value)
+    } catch (err) {
+      logger.warn(`[hapi-connector] 读取自动重试计数失败: ${err.message || err}`)
+      return 0
+    }
+  }
+
+  saveAutoRetryCount(sid, count) {
+    try {
+      this.stateStore?.setAutoRetryCount?.(sid, count)
+    } catch (err) {
+      logger.warn(`[hapi-connector] 保存自动重试计数失败: ${err.message || err}`)
+    }
+  }
+
+  clearAutoRetryCount(sid) {
+    try {
+      this.stateStore?.clearAutoRetryCount?.(sid)
+    } catch (err) {
+      logger.warn(`[hapi-connector] 清理自动重试计数失败: ${err.message || err}`)
+    }
   }
 
   resetAutoRetry(sid) {
@@ -354,6 +382,7 @@ export class SseListener {
     const state = this.autoRetry.get(sid)
     if (state?.timer) clearTimeout(state.timer)
     this.autoRetry.delete(sid)
+    this.clearAutoRetryCount(sid)
   }
 
   cancelPendingAutoRetry(sid) {
@@ -397,6 +426,7 @@ export class SseListener {
       if (!latest || latest.timer !== timer) return
       latest.timer = null
       latest.count += 1
+      this.saveAutoRetryCount(sid, latest.count)
       this.sendAutoContinue(sid, latest.count, max)
     }, retryDelayMs(this.config))
     state.timer = timer
