@@ -283,6 +283,7 @@ export class SseListener {
       if (this.config?.output_level === 'silence') return
 
       const visible = classifyHapiMessages(newMessages, { includeUsers: false })
+        .filter(item => this.shouldOutputClassifiedMessage(item))
         .map(formatClassifiedMessage)
         .filter(Boolean)
 
@@ -329,6 +330,14 @@ export class SseListener {
     }
 
     this.scheduleAutoContinueRetry(sid, matched)
+  }
+
+  /** {"type":"ready"} 这个系统消息在 output_level == simple 不输出 */
+  shouldOutputClassifiedMessage(item) {
+    if (this.config?.output_level === 'simple' && item?.kind === 'session-event' && item.event?.type === 'ready') {
+      return false
+    }
+    return true
   }
 
   retryState(sid) {

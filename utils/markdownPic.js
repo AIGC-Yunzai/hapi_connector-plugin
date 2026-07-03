@@ -18,9 +18,36 @@ export function nodesToMarkdown(nodes) {
       const text = String(item)
       const i = text.indexOf('\n')
       if (i < 0) return `**${text}**`
-      return `**${text.slice(0, i)}**\n\n${text.slice(i + 1)}`
+      const title = text.slice(0, i)
+      const body = text.slice(i + 1)
+      const language = fenceLanguage(title, body)
+      const content = language !== null ? fencedCode(body, language) : body
+      return `**${title}**\n\n${content}`
     })
     .join('\n\n---\n\n')
+}
+
+function fenceLanguage(title, body) {
+  const head = String(title || '').trim().toLowerCase()
+  const text = String(body || '').trim()
+  const toolName = extractToolName(text)
+  if (toolName && ['bash'].includes(toolName.toLowerCase())) return 'bash'
+  if (head.startsWith('system-event')) return ''
+  if (head.startsWith('tool') || toolName) return ''
+  return null
+}
+
+function fencedCode(text, language = '') {
+  const body = String(text || '').trim()
+  const ticks = body.match(/`{3,}/g) || []
+  const longest = ticks.reduce((max, item) => Math.max(max, item.length), 2)
+  const fence = '`'.repeat(longest + 1)
+  return `${fence}${language || ''}\n${body}\n${fence}`
+}
+
+function extractToolName(text) {
+  const match = String(text || '').trim().match(/^工具\s+([^:\s]+)\s*:?/)
+  return match?.[1] || ''
 }
 
 /**

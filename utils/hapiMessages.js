@@ -143,6 +143,10 @@ function classifyCodexPayload(message, data) {
     return buildClassified('assistant-reply', message, data.message)
   }
 
+  if (data.type === 'tool-call' && typeof data.callId === 'string') {
+    return buildClassified('tool-call', message, formatToolCall(data.name, data.input))
+  }
+
   if (data.type === 'context_compacted') {
     return buildClassified('session-event', message, 'Conversation compacted', {
       event: { type: 'compact' },
@@ -189,6 +193,7 @@ function labelForKind(kind) {
   if (kind === 'api-error') return 'api-error'
   if (kind === 'error') return 'error'
   if (kind === 'summary') return 'summary'
+  if (kind === 'tool-call') return 'tool'
   if (kind === 'user') return 'user'
   return kind
 }
@@ -234,10 +239,25 @@ function extractPlainText(value) {
   if (type === 'text') return String(value.text || '')
   if (type === 'thinking') return ''
   if (['generated-image', 'generated_image'].includes(type)) return ''
-  if (['tool_result', 'tool-call-result', 'token_count', 'tool_use', 'tool-call'].includes(type)) return ''
+  if (['tool_result', 'tool-call-result', 'token_count'].includes(type)) return ''
+  if (['tool_use', 'tool-call'].includes(type)) return formatToolCall(value.name, value.input)
   if (type === 'summary') return String(value.summary || '')
 
   return ''
+}
+
+function formatToolCall(name, input) {
+  const tool = firstString(name) || '?'
+  const args = isObject(input) ? input : {}
+  const command = Array.isArray(args.command)
+    ? args.command.filter(item => typeof item === 'string').join(' ')
+    : firstString(args.command, args.cmd)
+  if (command) return `工具 ${tool}: ${command}`
+
+  const description = firstString(args.description, args.path, args.file_path, args.query)
+  if (description) return `工具 ${tool}: ${description}`
+
+  return `工具 ${tool}`
 }
 
 function formatApiError(data) {
