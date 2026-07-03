@@ -255,6 +255,26 @@ export function supportGuoba() {
           bottomHelpMessage: '开启后，消息发送时若当前为 YOLO/bypassPermissions，先切 default 发送，3秒后自动恢复 YOLO/bypassPermissions 模式，用于某些站点无法直接开启 YOLO/bypassPermissions',
         },
         {
+          field: 'retry_error_strings',
+          label: '重试报错字符串',
+          bottomHelpMessage: '当 Hapi 返回这些报错字符串后，本插件自动发送 continue 重试（大小写敏感）',
+          component: "GTags",
+          componentProps: {
+            placeholder: '请输入API返回的报错字符串',
+            allowAdd: true,
+            allowDel: true,
+            valueParser: ((value) => value.split(',') || []),
+          },
+        },
+        {
+          field: 'retry_max_count',
+          label: '最大重试次数',
+          component: 'InputNumber',
+          helpMessage: '单位：次',
+          bottomHelpMessage: '命中重试报错字符串后，每次重试前等待 1 分钟；默认 10 次，设为 0 可关闭自动重试',
+          componentProps: { min: 0, step: 1 },
+        },
+        {
           label: '帮助',
           component: 'SOFT_GROUP_BEGIN',
         },

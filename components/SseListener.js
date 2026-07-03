@@ -10,6 +10,30 @@ import {
 import { buildMarkdownOutputs, nodesToMarkdown } from '../utils/markdownPic.js'
 import { collectGeneratedImagesFromMessages, imageSegmentFromBuffer } from '../utils/generatedImages.js'
 
+const AUTO_RETRY_DELAY_MS = 60 * 1000
+
+function retryErrorStrings(config = {}) {
+  const raw = config.retry_error_strings
+  const values = Array.isArray(raw)
+    ? raw
+    : typeof raw === 'string'
+      ? raw.split(',')
+      : []
+  return values
+    .map(item => String(item || '').trim())
+    .filter(Boolean)
+}
+
+function retryMaxCount(config = {}) {
+  const value = Number(config.retry_max_count ?? 10)
+  if (!Number.isFinite(value)) return 10
+  return Math.max(0, Math.floor(value))
+}
+
+function messageRole(content) {
+  return content?.message?.role || content?.role || '?'
+}
+
 export class SseListener {
   constructor(client, sessions, notify) {
     this.client = client
@@ -24,6 +48,7 @@ export class SseListener {
     this.connFailCount = 0
     this.connError = ''
     this.hibernated = false
+    this.autoRetry = new Map()
   }
 
   start(config) {
@@ -118,6 +143,14 @@ export class SseListener {
   }
 
   async handle(evt) {
+    if (evt.type === 'message-received') {
+      this.handleMessageReceived(evt)
+      return
+    }
+    if (evt.type === 'session-ended' || evt.type === 'session-removed') {
+      this.resetAutoRetry(evt.sessionId)
+      return
+    }
     if (evt.type !== 'session-updated') return
     const sid = evt.sessionId
     const data = evt.data || {}
@@ -140,8 +173,26 @@ export class SseListener {
       await this.handleRequests(sid, data.agentState.requests || {})
     }
 
+    if (!wasThinking && thinking) {
+      this.cancelPendingAutoRetry(sid)
+    }
+
     if (wasThinking && !thinking) {
       await this.notifyMessages(sid, oldSeq)
+    }
+  }
+
+  handleMessageReceived(evt) {
+    const sid = evt.sessionId
+    if (!sid) return
+
+    const content = evt.message?.content || {}
+    const role = messageRole(content)
+    if (role !== 'user') return
+
+    const text = (extractTextPreview(content) || '').trim()
+    if (text && text !== 'continue') {
+      this.resetAutoRetry(sid)
     }
   }
 
@@ -211,7 +262,6 @@ export class SseListener {
   }
 
   async notifyMessages(sid, oldSeq) {
-    if (this.config?.output_level === 'silence') return
     try {
       const messages = await ops.fetchMessages(this.client, sid, 50)
       if (!messages.length) return
@@ -221,13 +271,17 @@ export class SseListener {
 
       // 提取文本消息和 generated-image 消息
       const newMessages = messages.filter(item => (item.seq || 0) > oldSeq)
-      const agentMessages = newMessages.filter(item => ['agent', 'assistant'].includes(item.content?.message?.role || item.content?.role))
+      const agentMessages = newMessages.filter(item => ['agent', 'assistant'].includes(messageRole(item.content)))
+
+      this.handleAutoContinueRetry(sid, agentMessages)
+
+      if (this.config?.output_level === 'silence') return
 
       const visible = agentMessages
         .map(item => {
           const text = extractTextPreview(item.content)
           if (!text) return null
-          const role = item.content?.message?.role || item.content?.role || '?'
+          const role = messageRole(item.content)
           const seq = item.seq ? ` #${item.seq}` : ''
           return `${role}${seq}\n${text}`
         })
@@ -260,6 +314,98 @@ export class SseListener {
       }
     } catch (err) {
       logger.warn(`[hapi-connector] 拉取会话消息失败: ${err.message || err}`)
+    }
+  }
+
+  handleAutoContinueRetry(sid, agentMessages) {
+    if (!agentMessages.length) return
+
+    const text = agentMessages
+      .map(item => extractTextPreview(item.content))
+      .filter(Boolean)
+      .join('\n')
+    if (!text) return
+
+    const matched = retryErrorStrings(this.config).find(item => text.includes(item))
+    if (!matched) {
+      this.resetAutoRetry(sid)
+      return
+    }
+
+    this.scheduleAutoContinueRetry(sid, matched)
+  }
+
+  retryState(sid) {
+    let state = this.autoRetry.get(sid)
+    if (!state) {
+      state = { count: 0, timer: null }
+      this.autoRetry.set(sid, state)
+    }
+    return state
+  }
+
+  resetAutoRetry(sid) {
+    if (!sid) return
+    const state = this.autoRetry.get(sid)
+    if (state?.timer) clearTimeout(state.timer)
+    this.autoRetry.delete(sid)
+  }
+
+  cancelPendingAutoRetry(sid) {
+    const state = this.autoRetry.get(sid)
+    if (!state?.timer) return
+    clearTimeout(state.timer)
+    state.timer = null
+    logger.mark(`[hapi-connector] 会话已开始新一轮思考，取消待发送的自动 continue: ${sid.slice(0, 8)}`)
+  }
+
+  scheduleAutoContinueRetry(sid, matched) {
+    const max = retryMaxCount(this.config)
+    if (max <= 0) return
+
+    const state = this.retryState(sid)
+    if (state.timer) return
+
+    if (state.count >= max) {
+      logger.mark(`[hapi-connector] 自动 continue 重试已达上限 ${max}: ${sid.slice(0, 8)}`)
+      if (this.config?.output_level !== 'silence') {
+        this.notify(`自动 continue 重试已达上限 ${max} 次，已停止重试。\n命中报错：${matched}\n${sessionLabel(sid, this.sessions)}`, sid).catch(() => {})
+      }
+      return
+    }
+
+    state.count += 1
+    const attempt = state.count
+    logger.mark(`[hapi-connector] 命中报错字符串「${matched}」，将在 1 分钟后自动发送 continue (${attempt}/${max}): ${sid.slice(0, 8)}`)
+    if (this.config?.output_level !== 'silence') {
+      this.notify(`检测到 HAPI 报错，将在 1 分钟后自动发送 continue 重试 (${attempt}/${max})。\n命中报错：${matched}\n${sessionLabel(sid, this.sessions)}`, sid).catch(() => {})
+    }
+
+    let timer = null
+    timer = setTimeout(() => {
+      const latest = this.autoRetry.get(sid)
+      if (!latest || latest.timer !== timer) return
+      latest.timer = null
+      this.sendAutoContinue(sid, attempt, max)
+    }, AUTO_RETRY_DELAY_MS)
+    state.timer = timer
+  }
+
+  async sendAutoContinue(sid, attempt, max) {
+    if (!this.running) return
+    try {
+      const [ok, message] = await ops.sendMessageWithDelayYolo(this.client, sid, 'continue', [], {
+        delay_yolo_mode: !!this.config?.delay_yolo_mode,
+      })
+      if (ok) {
+        logger.mark(`[hapi-connector] 已自动发送 continue 重试 (${attempt}/${max}): ${sid.slice(0, 8)}`)
+      } else {
+        logger.warn(`[hapi-connector] 自动发送 continue 失败: ${message}`)
+        if (this.config?.output_level !== 'silence') await this.notify(`自动发送 continue 失败：${message}`, sid)
+      }
+    } catch (err) {
+      logger.warn(`[hapi-connector] 自动发送 continue 异常: ${err.message || err}`)
+      if (this.config?.output_level !== 'silence') await this.notify(`自动发送 continue 异常：${err.message || err}`, sid)
     }
   }
 
