@@ -343,7 +343,7 @@ export class SseListener {
   retryState(sid) {
     let state = this.autoRetry.get(sid)
     if (!state) {
-      state = { count: 0, timer: null }
+      state = { count: 0, timer: null, resetCountdown: false }
       this.autoRetry.set(sid, state)
     }
     return state
@@ -361,6 +361,7 @@ export class SseListener {
     if (!state?.timer) return
     clearTimeout(state.timer)
     state.timer = null
+    state.resetCountdown = true
     logger.mark(`[hapi-connector] 会话已开始新一轮思考，取消待发送的自动 continue: ${sid.slice(0, 8)}`)
   }
 
@@ -379,20 +380,24 @@ export class SseListener {
       return
     }
 
-    state.count += 1
-    const attempt = state.count
+    const attempt = state.count + 1
     const delayMin = Math.round(retryDelayMs(this.config) / 60000)
     logger.mark(`[hapi-connector] 命中报错字符串「${matched}」，将在 ${delayMin} 分钟后自动发送 continue (${attempt}/${max}): ${sid.slice(0, 8)}`)
     if (this.config?.output_level !== 'silence') {
-      this.notify(`检测到 HAPI 报错，将在 ${delayMin} 分钟后自动发送 continue 重试 (${attempt}/${max})。\n命中报错：${matched}\n${sessionLabel(sid, this.sessions)}`, sid).catch(() => {})
+      const prefix = state.resetCountdown
+        ? '再次触发 HAPI 报错，重试倒计时已重置'
+        : '检测到 HAPI 报错'
+      this.notify(`${prefix}，将在 ${delayMin} 分钟后自动发送 continue 重试 (${attempt}/${max})。\n命中报错：${matched}\n${sessionLabel(sid, this.sessions)}`, sid).catch(() => {})
     }
+    state.resetCountdown = false
 
     let timer = null
     timer = setTimeout(() => {
       const latest = this.autoRetry.get(sid)
       if (!latest || latest.timer !== timer) return
       latest.timer = null
-      this.sendAutoContinue(sid, attempt, max)
+      latest.count += 1
+      this.sendAutoContinue(sid, latest.count, max)
     }, retryDelayMs(this.config))
     state.timer = timer
   }
