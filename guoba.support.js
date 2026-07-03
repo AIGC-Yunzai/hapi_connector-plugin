@@ -169,7 +169,7 @@ export function supportGuoba() {
               { label: 'detail', value: 'detail' },
             ],
           },
-          bottomHelpMessage: 'silence 不推送 SSE 对话消息；simple 推送完整可见消息但隐藏 ready 系统事件；summary 只推送最后 N 条（由 summary_msg_count 控制）且隐藏 ready；detail 推送完整可见消息并保留 ready/system-event 等细节',
+          bottomHelpMessage: 'silence 不推送 SSE 对话消息；simple 推送完整可见消息但隐藏 ready/Context updated 系统事件；summary 只推送最后 N 条（由 summary_msg_count 控制）且隐藏 ready/Context updated；detail 推送完整可见消息并保留 ready/system-event 等细节',
         },
         {
           field: 'markdown_output',

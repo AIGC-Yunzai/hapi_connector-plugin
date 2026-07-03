@@ -333,9 +333,15 @@ export class SseListener {
     this.scheduleAutoContinueRetry(sid, matched)
   }
 
-  /** {"type":"ready"} 这个系统消息在 simple/summary 不输出，detail 保留完整事件 */
+  /** ready / Context updated(token-count) 在 simple/summary 不输出，detail 保留完整事件 */
   shouldOutputClassifiedMessage(item) {
-    if (['simple', 'summary'].includes(this.config?.output_level) && item?.kind === 'session-event' && item.event?.type === 'ready') {
+    const outputLevel = this.config?.output_level
+    if (item?.kind !== 'session-event') return true
+    const eventType = item.event?.type
+    if (['simple', 'summary'].includes(outputLevel) && eventType === 'ready') {
+      return false
+    }
+    if (['simple', 'summary'].includes(outputLevel) && eventType === 'token-count') {
       return false
     }
     return true
