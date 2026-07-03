@@ -8,8 +8,26 @@ class Config {
     this.cache = null
     this.configPath = path.join(pluginRoot, 'config', 'config', 'hapi.yaml')
     this.defaultPath = path.join(pluginRoot, 'config', 'hapi_default.yaml')
+    this._listeners = new Set()
+    this._debounceTimer = null
     this.ensureFiles()
     this.watch()
+  }
+
+  onChange(fn) {
+    this._listeners.add(fn)
+    return () => this._listeners.delete(fn)
+  }
+
+  offChange(fn) {
+    this._listeners.delete(fn)
+  }
+
+  _notifyListeners() {
+    const config = this.getConfig()
+    for (const fn of this._listeners) {
+      try { fn(config) } catch (err) { logger.warn('[hapi-connector] 配置变更回调执行失败', err) }
+    }
   }
 
   ensureFiles() {
@@ -67,6 +85,8 @@ class Config {
     try {
       fs.watch(this.configPath, () => {
         this.cache = null
+        clearTimeout(this._debounceTimer)
+        this._debounceTimer = setTimeout(() => this._notifyListeners(), 5000)
       })
     } catch (err) {
       logger.warn('[hapi-connector] 配置监听失败', err)

@@ -93,6 +93,16 @@ export class HapiConnector extends plugin {
       sharedSse ||= new SseListener(this.client, sessionsCache, this.pushNotification.bind(this))
       sharedSse.start(this.config)
     }
+
+    // 监听配置文件变更，自动同步到 SSE 和 Client（无需发送命令或重启）
+    Config.onChange((config) => {
+      this.config = config
+      this.client.configure(config)
+      if (sharedSse) {
+        sharedSse.config = config
+        logger.mark('[hapi-connector] 配置已自动热更新（通过文件监听）')
+      }
+    })
   }
 
   async ready(e) {

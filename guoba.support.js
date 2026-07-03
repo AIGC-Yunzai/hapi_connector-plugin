@@ -258,7 +258,7 @@ export function supportGuoba() {
         {
           field: 'retry_error_strings',
           label: '重试报错字符串',
-          bottomHelpMessage: '当 Hapi 返回这些报错字符串（1.包含报错字符串；2.大小写敏感）后，本插件自动发送 continue 重试',
+          bottomHelpMessage: '当 Hapi 的返回命中这些报错字符串（1.包含报错字符串；2.大小写敏感）后，本插件自动发送 continue 重试',
           component: "GTags",
           componentProps: {
             placeholder: '请输入API返回的报错字符串',
@@ -280,7 +280,7 @@ export function supportGuoba() {
           label: '重试等待时间',
           component: 'InputNumber',
           helpMessage: '单位：分钟',
-          bottomHelpMessage: '命中重试报错字符串后，等待指定分钟数后自动发送 continue 重试；默认 1 分钟',
+          bottomHelpMessage: '命中重试报错字符串后，等待指定分钟数后自动发送 continue 重试',
           componentProps: { min: 1, step: 1 },
         },
         {
@@ -301,7 +301,7 @@ export function supportGuoba() {
           }
           config.hapi_endpoint = String(config.hapi_endpoint || '').replace(/\/+$/, '')
           Config.setConfig(config)
-          return Result.ok({}, '保存成功，重启云崽后完整生效')
+          return Result.ok({}, '保存成功，请重启云崽以完整生效')
         } catch (err) {
           return Result.error(`保存失败：${err.message || err}`)
         }
