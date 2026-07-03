@@ -10,7 +10,11 @@ import {
 import { buildMarkdownOutputs, nodesToMarkdown } from '../utils/markdownPic.js'
 import { collectGeneratedImagesFromMessages, imageSegmentFromBuffer } from '../utils/generatedImages.js'
 
-const AUTO_RETRY_DELAY_MS = 60 * 1000
+function retryDelayMs(config = {}) {
+  const minutes = Number(config.retry_delay_minutes ?? 1)
+  if (!Number.isFinite(minutes) || minutes <= 0) return 60 * 1000
+  return Math.floor(minutes * 60 * 1000)
+}
 
 function retryErrorStrings(config = {}) {
   const raw = config.retry_error_strings
@@ -376,9 +380,10 @@ export class SseListener {
 
     state.count += 1
     const attempt = state.count
-    logger.mark(`[hapi-connector] 命中报错字符串「${matched}」，将在 1 分钟后自动发送 continue (${attempt}/${max}): ${sid.slice(0, 8)}`)
+    const delayMin = Math.round(retryDelayMs(this.config) / 60000)
+    logger.mark(`[hapi-connector] 命中报错字符串「${matched}」，将在 ${delayMin} 分钟后自动发送 continue (${attempt}/${max}): ${sid.slice(0, 8)}`)
     if (this.config?.output_level !== 'silence') {
-      this.notify(`检测到 HAPI 报错，将在 1 分钟后自动发送 continue 重试 (${attempt}/${max})。\n命中报错：${matched}\n${sessionLabel(sid, this.sessions)}`, sid).catch(() => {})
+      this.notify(`检测到 HAPI 报错，将在 ${delayMin} 分钟后自动发送 continue 重试 (${attempt}/${max})。\n命中报错：${matched}\n${sessionLabel(sid, this.sessions)}`, sid).catch(() => {})
     }
 
     let timer = null
@@ -387,7 +392,7 @@ export class SseListener {
       if (!latest || latest.timer !== timer) return
       latest.timer = null
       this.sendAutoContinue(sid, attempt, max)
-    }, AUTO_RETRY_DELAY_MS)
+    }, retryDelayMs(this.config))
     state.timer = timer
   }
 

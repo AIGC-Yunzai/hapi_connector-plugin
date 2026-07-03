@@ -258,7 +258,7 @@ export function supportGuoba() {
         {
           field: 'retry_error_strings',
           label: '重试报错字符串',
-          bottomHelpMessage: '当 Hapi 返回这些报错字符串后，本插件自动发送 continue 重试（大小写敏感）',
+          bottomHelpMessage: '当 Hapi 返回这些报错字符串（1.包含报错字符串；2.大小写敏感）后，本插件自动发送 continue 重试',
           component: "GTags",
           componentProps: {
             placeholder: '请输入API返回的报错字符串',
@@ -272,8 +272,16 @@ export function supportGuoba() {
           label: '最大重试次数',
           component: 'InputNumber',
           helpMessage: '单位：次',
-          bottomHelpMessage: '命中重试报错字符串后，每次重试前等待 1 分钟；默认 10 次，设为 0 可关闭自动重试',
+          bottomHelpMessage: '命中重试报错字符串后自动重试的最大次数；默认 10 次，设为 0 可关闭自动重试',
           componentProps: { min: 0, step: 1 },
+        },
+        {
+          field: 'retry_delay_minutes',
+          label: '重试等待时间',
+          component: 'InputNumber',
+          helpMessage: '单位：分钟',
+          bottomHelpMessage: '命中重试报错字符串后，等待指定分钟数后自动发送 continue 重试；默认 1 分钟',
+          componentProps: { min: 1, step: 1 },
         },
         {
           label: '帮助',

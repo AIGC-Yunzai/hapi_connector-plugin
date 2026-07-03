@@ -58,6 +58,10 @@ delay_yolo_mode: false
 
 # 命中这些 HAPI/API 报错字符串后，等待 1 分钟自动发送 continue 重试（大小写敏感）
 retry_error_strings:
-  - "API Error: Request rejected (429) · Service Unavailable"
+  - "API Error"
   - "API error"
+  - "Task failed"
 retry_max_count: 10
+
+# 命中 retry_error_strings 后，自动发送 continue 前的等待时间（单位：分钟），默认 1
+retry_delay_minutes: 1
