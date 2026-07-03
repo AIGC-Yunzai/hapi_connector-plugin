@@ -332,9 +332,9 @@ export class SseListener {
     this.scheduleAutoContinueRetry(sid, matched)
   }
 
-  /** {"type":"ready"} 这个系统消息在 output_level == simple 不输出 */
+  /** {"type":"ready"} 这个系统消息在 simple/summary 不输出，detail 保留完整事件 */
   shouldOutputClassifiedMessage(item) {
-    if (this.config?.output_level === 'simple' && item?.kind === 'session-event' && item.event?.type === 'ready') {
+    if (['simple', 'summary'].includes(this.config?.output_level) && item?.kind === 'session-event' && item.event?.type === 'ready') {
       return false
     }
     return true

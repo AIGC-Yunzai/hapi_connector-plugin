@@ -169,6 +169,7 @@ export function supportGuoba() {
               { label: 'detail', value: 'detail' },
             ],
           },
+          bottomHelpMessage: 'silence 不推送 SSE 对话消息；simple 推送完整可见消息但隐藏 ready 系统事件；summary 只推送最后 N 条（由 summary_msg_count 控制）且隐藏 ready；detail 推送完整可见消息并保留 ready/system-event 等细节',
         },
         {
           field: 'markdown_output',
@@ -193,7 +194,7 @@ export function supportGuoba() {
           field: 'merge_forward_single_node',
           label: '合并为单节点转发',
           component: 'Switch',
-          bottomHelpMessage: '开启后，多条消息合并为单个节点的合并转发（仍按字数上限约 6800 自动分隔）。用于微信 OC 等不支持合并转发、会降级为逐条发送且单周期消息条数有限的适配器',
+          bottomHelpMessage: '开启后，文字回复时，多条消息合并为单个节点的合并转发（仍按字数上限约 6800 自动分隔）。用于微信 OC 等不支持合并转发、会降级为逐条发送且单周期消息条数有限的适配器',
         },
         {
           component: 'Divider',
