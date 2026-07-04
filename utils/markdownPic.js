@@ -20,6 +20,8 @@ export function nodesToMarkdown(nodes) {
       if (i < 0) return `**${text}**`
       const title = text.slice(0, i)
       const body = text.slice(i + 1)
+      const toolBody = toolBodyToMarkdown(title, body)
+      if (toolBody !== null) return `**${title}**\n\n${toolBody}`
       const language = fenceLanguage(title, body)
       const content = language !== null ? fencedCode(body, language) : body
       return `**${title}**\n\n${content}`
@@ -30,11 +32,51 @@ export function nodesToMarkdown(nodes) {
 function fenceLanguage(title, body) {
   const head = String(title || '').trim().toLowerCase()
   const text = String(body || '').trim()
+  if (hasFencedCode(text)) return null
   const toolName = extractToolName(text)
   if (toolName && ['bash'].includes(toolName.toLowerCase())) return 'bash'
   if (head.startsWith('system-event')) return ''
   if (head.startsWith('tool') || toolName) return ''
   return null
+}
+
+function toolBodyToMarkdown(title, body) {
+  if (!isToolTitle(title)) return null
+  const parsed = parseToolBody(body)
+  if (!parsed) return String(body || '').trim()
+  if (!parsed.detail || hasFencedCode(parsed.detail)) {
+    return `${parsed.name}${parsed.detail ? `:\n${parsed.detail}` : ''}`.trim()
+  }
+  const language = toolCodeLanguage(parsed.name, parsed.detail)
+  const content = language ? fencedCode(parsed.detail, language) : parsed.detail
+  return `${parsed.name}:\n${content}`
+}
+
+function isToolTitle(title) {
+  const head = String(title || '').trim().toLowerCase()
+  return head === 'tool' || head.startsWith('tool ')
+}
+
+function parseToolBody(body) {
+  const text = String(body || '').trim()
+  if (!text) return null
+  const legacy = text.match(/^工具\s+([^:\s]+)\s*:?\s*([\s\S]*)$/)
+  if (legacy) return { name: legacy[1], detail: legacy[2].trim() }
+  const current = text.match(/^([^:\n]+)\s*:\s*([\s\S]*)$/)
+  if (current) return { name: current[1].trim(), detail: current[2].trim() }
+  return { name: text, detail: '' }
+}
+
+function toolCodeLanguage(toolName, detail) {
+  const name = String(toolName || '')
+  const text = String(detail || '').trim()
+  if (/bash|shell|exec|command|cmd/i.test(name)) return 'bash'
+  if (/^(?:\/bin\/(?:ba)?sh\b|(?:ba)?sh\b|zsh\b|fish\b|git\b|node\b|npm\b|pnpm\b|yarn\b|python(?:3)?\b|npx\b|deno\b|bun\b|docker\b|kubectl\b|sed\b|awk\b|grep\b|rg\b|find\b|cat\b|ls\b|cd\b|mkdir\b|rm\b|cp\b|mv\b)/.test(text)) return 'bash'
+  return ''
+}
+
+function hasFencedCode(text) {
+  return /(^|\n)`{3,}/.test(String(text || ''))
 }
 
 function fencedCode(text, language = '') {
@@ -46,7 +88,7 @@ function fencedCode(text, language = '') {
 }
 
 function extractToolName(text) {
-  const match = String(text || '').trim().match(/^工具\s+([^:\s]+)\s*:?/)
+  const match = String(text || '').trim().match(/^(?:工具\s+)?([^:\s]+)\s*:/)
   return match?.[1] || ''
 }
 

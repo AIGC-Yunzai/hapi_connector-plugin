@@ -252,12 +252,12 @@ function formatToolCall(name, input) {
   const command = Array.isArray(args.command)
     ? args.command.filter(item => typeof item === 'string').join(' ')
     : firstString(args.command, args.cmd)
-  if (command) return `工具 ${tool}: ${command}`
+  if (command) return `${tool}: ${command}`
 
   const description = firstString(args.description, args.path, args.file_path, args.query)
-  if (description) return `工具 ${tool}: ${description}`
+  if (description) return `${tool}: ${description}`
 
-  return `工具 ${tool}`
+  return tool
 }
 
 function formatApiError(data) {

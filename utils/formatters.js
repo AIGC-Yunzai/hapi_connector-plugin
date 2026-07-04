@@ -36,7 +36,7 @@ function extractInner(value, limit) {
     const name = value.name || '?'
     const input = value.input || {}
     const command = typeof input === 'object' ? input.command : ''
-    return command ? `工具 ${name}: ${command.slice(0, limit)}` : `工具 ${name}`
+    return command ? `${name}: ${String(command).slice(0, limit)}` : String(name)
   }
   if (type === 'event') {
     const eventType = value.data?.type

@@ -207,11 +207,9 @@
     <script>
         marked.setOptions({
             renderer: new marked.Renderer(),
-            highlight: function (code, lang) {
-                const language = hljs.getLanguage(lang) ? lang : 'plaintext';
-                return hljs.highlight(code, { language }).value;
-            },
-            langPrefix: 'hljs language-',
+            // marked v15 不再通过 highlight 选项注入高亮 HTML；
+            // 这里只输出 language-xxx，解析完成后再交给 highlight.js 着色。
+            langPrefix: 'language-',
             pedantic: false,
             gfm: true,
             breaks: true,
@@ -253,6 +251,13 @@
 
         document.querySelectorAll('.markdown-content').forEach(element => {
             element.innerHTML = marked.parse(element.textContent);
+            element.querySelectorAll('pre code').forEach(block => {
+                try {
+                    hljs.highlightElement(block);
+                } catch (e) {
+                    // 高亮失败时保留原始代码块，避免影响图片渲染
+                }
+            });
         });
     </script>
 </body>
