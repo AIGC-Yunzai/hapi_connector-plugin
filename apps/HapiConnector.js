@@ -505,29 +505,37 @@ export class HapiConnector extends plugin {
     const machines = await ops.fetchMachines(this.client)
     if (!machines.length) return this.reply(HAPI_RUNNER_HINT)
 
-    let machineInput = parts[0] || await this.awaitSettingArg(e, [
-      '请选择用于创建 session 的 machine，发送序号或 machineId：',
-      '',
-      formatMachineChoices(machines),
-    ].join('\n'))
-    if (!machineInput) return true
-
-    let machine = resolveMachineChoice(machineInput, machines)
-    while (!machine) {
-      await this.reply(`无效 machine：${machineInput}\n请发送序号或 machineId，发送“取消”退出`)
-      machineInput = await this.awaitSettingArg(e, formatMachineChoices(machines))
+    let machine
+    let argOffset = 0
+    if (machines.length === 1) {
+      machine = machines[0]
+      if (parts[0] && resolveMachineChoice(parts[0], machines)) argOffset = 1
+    } else {
+      let machineInput = parts[0] || await this.awaitSettingArg(e, [
+        '请选择用于创建 session 的 machine，发送序号或 machineId：',
+        '',
+        formatMachineChoices(machines),
+      ].join('\n'))
       if (!machineInput) return true
+
       machine = resolveMachineChoice(machineInput, machines)
+      while (!machine) {
+        await this.reply(`无效 machine：${machineInput}\n请发送序号或 machineId，发送“取消”退出`)
+        machineInput = await this.awaitSettingArg(e, formatMachineChoices(machines))
+        if (!machineInput) return true
+        machine = resolveMachineChoice(machineInput, machines)
+      }
+      argOffset = 1
     }
 
-    const directory = parts[1] || await this.selectMachineDirectory(e, machine)
+    const directory = parts[argOffset] || await this.selectMachineDirectory(e, machine)
     if (!directory) return true
 
     const agents = ['claude', 'codex', 'gemini', 'opencode']
-    const agent = await this.awaitChoiceArg(e, '请选择 agent：\n1. claude\n2. codex\n3. gemini\n4. opencode', agents, parts[2])
+    const agent = await this.awaitChoiceArg(e, '请选择 agent：\n1. claude\n2. codex\n3. gemini\n4. opencode', agents, parts[argOffset + 1])
     if (!agent) return true
 
-    const sessionType = await this.awaitChoiceArg(e, '请选择 session 类型：\n1. simple\n2. worktree', ['simple', 'worktree'], parts[3], 'simple')
+    const sessionType = await this.awaitChoiceArg(e, '请选择 session 类型：\n1. simple\n2. worktree', ['simple', 'worktree'], parts[argOffset + 2], 'simple')
     if (!sessionType) return true
 
     const flavor = agent.toLowerCase()
@@ -1507,7 +1515,7 @@ function formatMachineChoices(machines) {
     const name = machine.name && machine.name !== id ? `\n${machine.name}` : ''
     const roots = machineWorkspaceRoots(machine)
     const rootText = roots.length
-      ? `\n工作目录:\n${roots.map((root, rootIdx) => `  ${rootIdx + 1}. ${root}`).join('\n')}`
+      ? `\n工作目录:\n${roots.map(root => `  ${root}`).join('\n')}`
       : ''
     return `[${idx + 1}] ${id}${name}${rootText}`
   }).join('\n\n')
