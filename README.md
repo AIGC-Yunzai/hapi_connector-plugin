@@ -108,17 +108,15 @@ access_token: "your-token"
 ### 消息发送
 
 ```text
-#hapi chat <内容>          发送到当前 session
-#hapi chatN <内容>         发送到第 N 个 session，例如 #hapi chat2 继续
 #hapi to <序号> <内容>      发送到指定 session
-> 内容                     快捷发送到当前 session
->{N} 内容                    快捷发送到第 N 个 session
+> 内容                      快捷发送到当前 session
+>{N} 内容                   快捷发送到第 N 个 session
 > 上传附件3张 [内容]         等待 3 个附件后发送到当前 session
-> {N} 上传附件5份 [内容]     等待 5 个附件后发送到第 N 个 session
+> {3} 上传附件5份 [内容]     等待 5 个附件后发送到第 3 个 session
 ```
 
 > [!TIP]
-> 快捷发送、`#hapi chat`、`#hapi chatN`、`#hapi to` 支持同一条消息附带图片/视频/文件等附件，插件会先上传附件到 HAPI，再把附件引用随消息发送。`> 上传附件3张` 会进入等待模式，按提示继续发送附件即可。
+> 快捷发送、`#hapi to` 支持同一条消息附带图片/视频/文件等附件，插件会先上传附件到 HAPI，再把附件引用随消息发送。`> 上传附件3张` 会进入等待模式，按提示继续发送附件即可。
 
 ### Session 管理
 
@@ -160,7 +158,7 @@ access_token: "your-token"
 ```
 
 > [!TIP]
-> `#hapi answer` 只用于回答 HAPI agent 发起的 question 请求，不会把内容当作普通聊天消息发送。普通对话请使用 `#hapi chat <内容>`、`#hapi chatN <内容>`、`#hapi to <序号> <内容>` 或快捷发送。
+> `#hapi answer` 只用于回答 HAPI agent 发起的 question 请求，不会把内容当作普通聊天消息发送。普通对话请使用 `#hapi to <序号> <内容>` 或快捷发送。
 
 ### 文件操作
 

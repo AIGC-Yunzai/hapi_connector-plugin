@@ -364,8 +364,6 @@ export function helpNodes(topic = '', config = {}) {
       '#hapi s                 查看当前状态',
       '#hapi msg [条数]        查看最近消息',
       '#hapi diff              以图片查看当前工作区未暂存变更',
-      '#hapi chat <内容>       发消息到当前 session',
-      '#hapi chat2 <内容>      发消息到第 2 个 session',
       '#hapi to <序号> <内容>  发消息到指定 session',
       ...quickSendLines,
     ].join('\n'),

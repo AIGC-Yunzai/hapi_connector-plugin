@@ -147,19 +147,20 @@ export class HapiConnector extends plugin {
     if (!cmd || cmd === 'help' || cmd === '帮助') return this.reply(helpNodes(arg, this.config))
 
     try {
-      const chatMatch = cmd.match(/^chat(\d*)$/)
-      if (chatMatch) return this.cmdChat(e, arg, chatMatch[1] || '')
-
       switch (cmd) {
-        case 'list':
         case 'ls':
+        case 'list':
+        case '列表':
           return this.cmdList(e, arg)
         case 'sw':
+        case 'switch':
+        case '切换':
           return this.cmdSwitch(e, arg)
         case 'diff':
           return this.cmdDiff(e)
         case 's':
         case 'status':
+        case '状态':
           return this.cmdStatus(e)
         case 'msg':
         case 'messages':
@@ -185,13 +186,16 @@ export class HapiConnector extends plugin {
         case 'machine':
           return this.cmdMachines(e)
         case 'create':
+        case '创建':
           return this.cmdCreate(e, arg)
         case 'abort':
         case 'stop':
           return this.cmdSessionAction(e, arg, ops.abortSession)
         case 'archive':
+        case '归档':
           return this.cmdSessionAction(e, arg, ops.archiveSession)
         case 'resume':
+        case '恢复':
           return this.cmdResume(e, arg)
         case 'rename':
           return this.cmdRename(e, arg)
@@ -212,7 +216,6 @@ export class HapiConnector extends plugin {
         case 'plan':
           return this.cmdPlan(e)
         case 'output':
-        case 'out':
           return this.cmdOutput(e, arg)
         case 'bind':
           return this.cmdBind(e, arg)
@@ -223,8 +226,8 @@ export class HapiConnector extends plugin {
           return this.cmdFiles(e, arg || '.')
         case 'find':
           return this.cmdFind(e, arg)
-        case 'download':
         case 'dl':
+        case 'download':
           return this.cmdDownload(e, arg)
         case 'upload':
           return this.cmdUpload(e, arg)
@@ -278,28 +281,6 @@ export class HapiConnector extends plugin {
     const messageText = await this.withQuotedText(e, rest)
     const [, reply] = await this._sendMessage(sid, messageText, attachments)
     logger.info(`[hapi-connector] quickSend 触发: ${State.formatWindowKey(State.windowKey(e))} -> ${sid.slice(0, 8)}`)
-    if (uploadText) await this.reply(uploadText)
-    return this.reply(reply)
-  }
-
-  async cmdChat(e, text, index = '') {
-    if (!text) return this.reply(`用法：#hapi chat${index || ''} <内容>`)
-
-    let session
-    if (index) {
-      await this.refreshSessions()
-      session = sessionsCache[Number(index) - 1]
-      if (!session) return this.reply(`无效序号 ${index}，共 ${sessionsCache.length} 个 session`)
-    } else {
-      const sid = State.currentSid(e)
-      if (!sid) return this.reply('请先用 #hapi sw <序号> 选择一个 session')
-      session = { id: sid }
-    }
-
-    const [uploadText, attachments] = await this.uploadMessageAttachments(e, session.id)
-    const messageText = await this.withQuotedText(e, text)
-    const [, reply] = await this._sendMessage(session.id, messageText, attachments)
-    logger.info(`[hapi-connector] chat 触发: ${State.formatWindowKey(State.windowKey(e))} -> ${session.id.slice(0, 8)}`)
     if (uploadText) await this.reply(uploadText)
     return this.reply(reply)
   }
