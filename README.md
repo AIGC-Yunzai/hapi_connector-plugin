@@ -102,6 +102,7 @@ access_token: "your-token"
 #hapi sw <序号|ID前缀>      切换当前 session
 #hapi s                    查看当前 session 状态
 #hapi msg [条数]           查看最近消息
+#hapi diff                 以 Markdown 图片查看当前工作区未暂存变更
 ```
 
 ### 消息发送

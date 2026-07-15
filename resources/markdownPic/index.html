@@ -170,6 +170,195 @@
             margin: 22px 0;
         }
 
+        /* #hapi diff：使用 Codex TUI 的默认浅色 diff 调色板。 */
+        .codex-diff {
+            color: #1f2328;
+            font-size: 14px;
+            line-height: 1.45;
+            letter-spacing: 0;
+        }
+
+        .codex-diff-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #1f2328;
+            font-size: 25px;
+            font-weight: 750;
+            line-height: 1.25;
+        }
+
+        .codex-diff-page {
+            margin-left: auto;
+            padding: 2px 10px;
+            border: 1px solid #d0d7de;
+            border-radius: 999px;
+            color: #656d76;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .codex-diff-workspace {
+            margin-top: 5px;
+            color: #656d76;
+            font-family: "Consolas", "SpaceMono", monospace;
+            font-size: 12px;
+            overflow-wrap: anywhere;
+        }
+
+        .codex-diff-summary {
+            margin: 18px 0 12px;
+            font-size: 15px;
+        }
+
+        .codex-diff-bullet,
+        .codex-diff-tree {
+            color: #8c959f;
+        }
+
+        .codex-diff-stat-add {
+            color: #1a7f37;
+            font-weight: 650;
+        }
+
+        .codex-diff-stat-del {
+            color: #cf222e;
+            font-weight: 650;
+        }
+
+        .codex-diff-file {
+            margin: 0 0 18px;
+        }
+
+        .codex-diff-file-head {
+            display: flex;
+            align-items: baseline;
+            gap: 7px;
+            margin: 0 0 7px;
+            color: #1f2328;
+            font-family: "Consolas", "SpaceMono", monospace;
+            font-size: 13px;
+            font-weight: 650;
+            overflow-wrap: anywhere;
+        }
+
+        .codex-diff-file-stats {
+            margin-left: auto;
+            white-space: nowrap;
+        }
+
+        .codex-diff-continuation {
+            color: #8c959f;
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .codex-diff-lines {
+            overflow: hidden;
+            border: 1px solid #d0d7de;
+            border-radius: 7px;
+            background: #ffffff;
+            font-family: "Consolas", "SpaceMono", monospace;
+            font-size: 12.5px;
+            line-height: 1.48;
+        }
+
+        .codex-diff-row {
+            display: grid;
+            grid-template-columns: 46px 20px minmax(0, 1fr);
+            min-height: 20px;
+            background: #ffffff;
+        }
+
+        .codex-diff-row.add {
+            background: #dafbe1;
+        }
+
+        .codex-diff-row.del {
+            background: #ffebe9;
+        }
+
+        .codex-diff-number,
+        .codex-diff-sign,
+        .codex-diff-code {
+            box-sizing: border-box;
+            padding-top: 1px;
+            padding-bottom: 1px;
+        }
+
+        .codex-diff-number {
+            padding-right: 8px;
+            color: #656d76;
+            background: #f6f8fa;
+            text-align: right;
+            user-select: none;
+        }
+
+        .codex-diff-row.add .codex-diff-number {
+            color: #1f2328;
+            background: #aceebb;
+        }
+
+        .codex-diff-row.del .codex-diff-number {
+            color: #1f2328;
+            background: #ffcecb;
+        }
+
+        .codex-diff-sign {
+            padding-left: 6px;
+            color: #8c959f;
+            user-select: none;
+        }
+
+        .codex-diff-row.add .codex-diff-sign {
+            color: #1a7f37;
+            font-weight: 700;
+        }
+
+        .codex-diff-row.del .codex-diff-sign {
+            color: #cf222e;
+            font-weight: 700;
+        }
+
+        .codex-diff-code {
+            min-width: 0;
+            padding-right: 8px;
+            white-space: pre;
+        }
+
+        .codex-diff-code code,
+        .markdown-content .codex-diff-code code.hljs {
+            display: inline;
+            padding: 0;
+            border: 0;
+            border-radius: 0;
+            color: inherit;
+            background: transparent;
+            font: inherit;
+            white-space: pre;
+        }
+
+        .codex-diff-row.meta .codex-diff-code,
+        .codex-diff-row.meta .codex-diff-sign,
+        .codex-diff-row.separator .codex-diff-sign {
+            color: #8c959f;
+            font-style: italic;
+        }
+
+        .codex-diff-row.separator {
+            background: #f6f8fa;
+        }
+
+        .codex-diff-empty {
+            margin-top: 18px;
+            padding: 24px;
+            border: 1px dashed #afb8c1;
+            border-radius: 9px;
+            color: #656d76;
+            background: #f6f8fa;
+            text-align: center;
+        }
+
         .cute-girl {
             position: absolute;
             right: 4px;
@@ -256,6 +445,13 @@
                     hljs.highlightElement(block);
                 } catch (e) {
                     // 高亮失败时保留原始代码块，避免影响图片渲染
+                }
+            });
+            element.querySelectorAll('.codex-diff-code code[data-language]').forEach(block => {
+                try {
+                    hljs.highlightElement(block);
+                } catch (e) {
+                    // 单行语法高亮失败时保留纯文本 diff。
                 }
             });
         });

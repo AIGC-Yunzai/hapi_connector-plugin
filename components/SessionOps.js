@@ -29,6 +29,20 @@ export async function fetchMessages(client, sid, limit = 10) {
   return data.messages || []
 }
 
+export async function fetchGitStatus(client, sid) {
+  return client.requestJson('GET', `/api/sessions/${sid}/git-status`)
+}
+
+export async function fetchGitDiffNumstat(client, sid, staged = false) {
+  return client.requestJson('GET', `/api/sessions/${sid}/git-diff-numstat`, { params: { staged } })
+}
+
+export async function fetchGitDiffFile(client, sid, filePath, staged = false) {
+  return client.requestJson('GET', `/api/sessions/${sid}/git-diff-file`, {
+    params: { path: filePath, staged },
+  })
+}
+
 export async function fetchGeneratedImage(client, sid, imageId) {
   try {
     const res = await client.get(`/api/sessions/${sid}/generated-images/${imageId}`)

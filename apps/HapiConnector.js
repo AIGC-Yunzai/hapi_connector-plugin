@@ -13,8 +13,17 @@ import {
   uploadFile,
 } from '../components/FileOps.js'
 import { smartReply } from '../utils/reply.js'
-import { buildMarkdownOutputs, nodesToMarkdown } from '../utils/markdownPic.js'
+import { buildMarkdownOutputs, nodesToMarkdown, renderMarkdownImage } from '../utils/markdownPic.js'
 import { collectGeneratedImagesFromMessages, imageSegmentFromBuffer } from '../utils/generatedImages.js'
+import {
+  buildDiffMarkdownPages,
+  buildUntrackedDiff,
+  countDiffRows,
+  isBinaryBuffer,
+  parseGitBranch,
+  parseUnifiedDiff,
+  parseUnstagedFiles,
+} from '../utils/gitDiff.js'
 import {
   CLAUDE_EFFORTS,
   CODEX_EFFORTS,
@@ -147,6 +156,8 @@ export class HapiConnector extends plugin {
           return this.cmdList(e, arg)
         case 'sw':
           return this.cmdSwitch(e, arg)
+        case 'diff':
+          return this.cmdDiff(e)
         case 's':
         case 'status':
           return this.cmdStatus(e)
@@ -384,6 +395,98 @@ export class HapiConnector extends plugin {
     const flavor = meta.flavor || '?'
     const displayText = title ? `[${flavor}] ${session.id.slice(0, 8)} ${title}` : `[${flavor}] ${session.id.slice(0, 8)}`
     return this.reply(`已切换到 ${displayText}\n消息将推送到当前${e.isGroup ? '群' : '私'}聊`)
+  }
+
+  async cmdDiff(e) {
+    const sid = State.currentSid(e)
+    if (!sid) {
+      return this.replyDiffImages(buildDiffMarkdownPages({
+        path: '(未选择 session)',
+        notice: '请先用 #hapi sw <序号> 选择一个 session',
+      }))
+    }
+
+    try {
+      const [detail, statusResult, numstatResult] = await Promise.all([
+        this.fetchSessionHeaderDetail(sid),
+        ops.fetchGitStatus(this.client, sid),
+        ops.fetchGitDiffNumstat(this.client, sid, false).catch(err => ({
+          success: false,
+          error: err.message || String(err),
+        })),
+      ])
+      const workspace = {
+        sid,
+        path: detail?.metadata?.path || sessionsCache.find(item => item.id === sid)?.metadata?.path || '(未知工作区)',
+        branch: parseGitBranch(statusResult?.stdout),
+        files: [],
+      }
+
+      if (!statusResult?.success) {
+        workspace.notice = `无法读取工作区状态：${gitCommandError(statusResult)}`
+        return this.replyDiffImages(buildDiffMarkdownPages(workspace))
+      }
+
+      const files = parseUnstagedFiles(
+        statusResult.stdout || '',
+        numstatResult?.success ? numstatResult.stdout || '' : '',
+      )
+      workspace.files = await mapLimit(files, UPLOAD_CONCURRENCY, file => this.fetchDiffFile(sid, file))
+      return this.replyDiffImages(buildDiffMarkdownPages(workspace))
+    } catch (err) {
+      logger.error('[hapi-connector] 获取工作区 diff 失败', err)
+      return this.replyDiffImages(buildDiffMarkdownPages({
+        sid,
+        path: sessionsCache.find(item => item.id === sid)?.metadata?.path || '(未知工作区)',
+        notice: `获取工作区 Diff 失败：${err.message || err}`,
+      }))
+    }
+  }
+
+  async fetchDiffFile(sid, file) {
+    try {
+      if (file.status === 'untracked') {
+        const [ok, content] = await ops.readFile(this.client, sid, file.path)
+        if (!ok) return { ...file, rows: [{ type: 'meta', content: `读取未跟踪文件失败：${content}` }] }
+        const buffer = Buffer.from(content, 'base64')
+        if (isBinaryBuffer(buffer)) {
+          return { ...file, binary: true, rows: [{ type: 'meta', content: '未跟踪的二进制文件' }] }
+        }
+        const rows = buildUntrackedDiff(buffer.toString('utf8'))
+        return { ...file, ...countDiffRows(rows), rows }
+      }
+
+      const result = await ops.fetchGitDiffFile(this.client, sid, file.path, false)
+      if (!result?.success) {
+        return { ...file, rows: [{ type: 'meta', content: `Diff 不可用：${gitCommandError(result)}` }] }
+      }
+      const rows = parseUnifiedDiff(result.stdout || '')
+      const stats = countDiffRows(rows)
+      return {
+        ...file,
+        added: file.binary ? file.added : stats.added,
+        removed: file.binary ? file.removed : stats.removed,
+        rows,
+      }
+    } catch (err) {
+      return { ...file, rows: [{ type: 'meta', content: `Diff 不可用：${err.message || err}` }] }
+    }
+  }
+
+  async replyDiffImages(pages) {
+    let sent = false
+    for (const markdown of pages || []) {
+      try {
+        const image = await renderMarkdownImage(markdown)
+        if (!image) continue
+        await this.reply(image)
+        sent = true
+      } catch (err) {
+        logger.warn(`[hapi-connector] #hapi diff 图片发送失败: ${err.message || err}`)
+      }
+    }
+    if (!sent) logger.warn('[hapi-connector] #hapi diff 图片渲染失败，已按“仅图片”要求跳过文字回退')
+    return true
   }
 
   async cmdStatus(e) {
@@ -1679,6 +1782,10 @@ function sourceKey(source) {
   if (source.kind === 'path') return `path:${source.path}`
   if (source.kind === 'url') return `url:${source.url}`
   return `inline:${source.data}`
+}
+
+function gitCommandError(result) {
+  return result?.error || result?.stderr || '未知错误'
 }
 
 async function mapLimit(items, limit, mapper) {

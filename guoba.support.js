@@ -28,6 +28,7 @@ export function supportGuoba() {
     helpItem('sw', '切换当前 session', '#hapi sw <序号|ID前缀>', '切换到该 session 后，将同步 HAPI 消息发送到当前群/私聊'),
     helpItem('s', '查看当前 session 状态', '#hapi s'),
     helpItem('msg', '查看最近消息', '#hapi msg [条数]'),
+    helpItem('diff', '查看工作区未暂存变更', '#hapi diff', '显示 #hapi sw 当前 session 工作区的未暂存 Diff，仅发送 Markdown 图片'),
     helpItem('chat', '发消息到当前 session', '#hapi chat <内容>'),
     helpItem('chatn', '发消息到第 N 个 session', '#hapi chatN <内容>', '如 #hapi chat2 继续'),
     helpItem('to', '发消息到指定 session', '#hapi to <序号> <内容>'),
