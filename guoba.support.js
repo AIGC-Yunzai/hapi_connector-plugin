@@ -186,6 +186,19 @@ export function supportGuoba() {
           bottomHelpMessage: '推送 AI 回复（SSE 推送与 #hapi msg）的输出方式：仅文字 / 仅 Markdown 图片 / 两者都发。「仅图片」渲染失败时会自动回退为文字',
         },
         {
+          field: 'markdown_theme',
+          label: 'Markdown 图片主题',
+          component: 'Select',
+          componentProps: {
+            options: [
+              { label: '自动', value: 'auto' },
+              { label: '浅色', value: 'light' },
+              { label: '深色', value: 'dark' },
+            ],
+          },
+          bottomHelpMessage: 'Markdown 图片主题自动模式：06:00-17:59 使用浅色，其余时间使用深色；同时应用于 AI 回复的 Markdown 图片、#hapi msg 与 #hapi diff；默认浅色',
+        },
+        {
           field: 'more_session_info',
           label: '更多session信息',
           component: 'Switch',

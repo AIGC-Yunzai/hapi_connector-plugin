@@ -97,14 +97,15 @@ function extractToolName(text) {
  * @param {string} mode 'text' 仅文字 / 'image' 仅图片 / 'both' 图片+文字（默认 text）
  * @param {*} textPayload 文字内容（字符串或节点数组）
  * @param {string} markdownContent 用于渲染图片的 markdown 文本
+ * @param {string} theme 'auto' 自动 / 'light' 浅色 / 'dark' 深色（默认 light）
  * @returns {Promise<Array>} 待发送内容序列（文字在前、图片在后）
  */
-export async function buildMarkdownOutputs(mode, textPayload, markdownContent) {
+export async function buildMarkdownOutputs(mode, textPayload, markdownContent, theme = 'light') {
   const m = mode || 'text'
   const wantImage = m === 'image' || m === 'both'
   const wantText = m === 'text' || m === 'both'
   let img = null
-  if (wantImage) img = await renderMarkdownImage(markdownContent)
+  if (wantImage) img = await renderMarkdownImage(markdownContent, theme)
   const outs = []
   // 仅图片模式渲染失败时回退为文字，避免什么都收不到
   if (wantText || !img) outs.push(textPayload)
@@ -112,13 +113,15 @@ export async function buildMarkdownOutputs(mode, textPayload, markdownContent) {
   return outs
 }
 
-export async function renderMarkdownImage(content) {
+export async function renderMarkdownImage(content, theme = 'light') {
   if (!content || !String(content).trim()) return false
   try {
+    const themeClass = resolveMarkdownTheme(theme) === 'dark' ? 'theme-dark' : 'theme-light'
     const img = await puppeteer.screenshot('hapi-markdown', {
       _path,
       tplFile: './plugins/hapi_connector-plugin/resources/markdownPic/index.html',
       content: String(content),
+      themeClass,
       girlImage: pickGirlImage(),
     })
     return img || false
@@ -126,6 +129,14 @@ export async function renderMarkdownImage(content) {
     logger.warn(`[hapi-connector] 生成 markdown 图片失败: ${err?.message || err}`)
     return false
   }
+}
+
+export function resolveMarkdownTheme(theme, now = new Date()) {
+  const normalized = String(theme || '').trim().toLowerCase()
+  if (normalized === 'dark') return 'dark'
+  if (normalized !== 'auto') return 'light'
+  const hour = now.getHours()
+  return hour >= 6 && hour < 18 ? 'light' : 'dark'
 }
 
 function pickGirlImage() {

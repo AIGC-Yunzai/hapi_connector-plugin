@@ -24,6 +24,10 @@ summary_msg_count: 5
 # 推送 AI 回复的输出方式：text 仅文字 / image 仅图片 / both 图片+文字
 markdown_output: "text"
 
+# Markdown 图片主题：auto 自动（06:00-17:59 浅色，其余深色）/ light 浅色 / dark 深色
+# 使用运行云崽的服务器本地时间，同时应用于 #hapi diff
+markdown_theme: "light"
+
 # 是否展示更多 session 信息。开启后，每次完成对话会额外通信获取最新权限/模型/思考强度
 more_session_info: false
 

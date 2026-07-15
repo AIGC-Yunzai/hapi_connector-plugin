@@ -477,7 +477,7 @@ export class HapiConnector extends plugin {
     let sent = false
     for (const markdown of pages || []) {
       try {
-        const image = await renderMarkdownImage(markdown)
+        const image = await renderMarkdownImage(markdown, this.config?.markdown_theme)
         if (!image) continue
         await this.reply(image)
         sent = true
@@ -516,7 +516,12 @@ export class HapiConnector extends plugin {
       ? sessionLabelWithRuntime(detail || sid, detail ? [detail] : sessionsCache)
       : sessionLabel(sid, sessionsCache)
     const nodes = [header, ...formatMessageNodes(messages)]
-    const outs = await buildMarkdownOutputs(this.config?.markdown_output, nodes, nodesToMarkdown(nodes))
+    const outs = await buildMarkdownOutputs(
+      this.config?.markdown_output,
+      nodes,
+      nodesToMarkdown(nodes),
+      this.config?.markdown_theme,
+    )
     for (const out of outs) await this.reply(out)
     await this.replyGeneratedImages(sid, collectGeneratedImagesFromMessages(messages))
     return

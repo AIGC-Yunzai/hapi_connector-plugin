@@ -295,7 +295,12 @@ export class SseListener {
       if (picked.length) {
         const header = await this.buildSessionHeader(sid)
         const payload = [header, ...picked]
-        const outs = await buildMarkdownOutputs(this.config?.markdown_output, payload, nodesToMarkdown(payload))
+        const outs = await buildMarkdownOutputs(
+          this.config?.markdown_output,
+          payload,
+          nodesToMarkdown(payload),
+          this.config?.markdown_theme,
+        )
         for (const out of outs) await this.notify(out, sid)
       }
 
