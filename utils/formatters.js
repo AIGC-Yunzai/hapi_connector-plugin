@@ -103,8 +103,13 @@ function firstNonEmpty(...values) {
 }
 
 function formatReasoningEffort(session, flavor = '') {
+  const effectiveModelReasoningEffort = firstNonEmpty(
+    session.effectiveModelReasoningEffort,
+    session.effective_model_reasoning_effort,
+  )
   const modelReasoningEffort = firstNonEmpty(session.modelReasoningEffort, session.model_reasoning_effort)
   const effort = firstNonEmpty(session.effort)
+  if (effectiveModelReasoningEffort) return effectiveModelReasoningEffort
   if (modelReasoningEffort) return modelReasoningEffort
   if (effort) return effort
   if (flavor === 'claude') return 'auto'
@@ -192,6 +197,7 @@ export function formatSessionListNodes(sessions, currentSid = '', allSessions = 
 
 export function formatSessionStatus(session) {
   const meta = session.metadata || {}
+  const flavor = String(meta.flavor || '').toLowerCase()
   const lines = [
     `Session:  ${session.id?.slice(0, 8)}...`,
     `标题:     ${meta.summary?.text || meta.name || '(无标题)'}`,
@@ -200,8 +206,11 @@ export function formatSessionStatus(session) {
     `Active:   ${Boolean(session.active)}`,
     `Thinking: ${Boolean(session.thinking)}`,
     `权限模式: ${session.permissionMode || 'default'}`,
-    `模型:     ${session.modelMode || 'default'}`,
+    `模型:     ${firstNonEmpty(session.model, session.modelMode, session.model_mode) || 'default'}`,
   ]
+  if (['claude', 'codex', 'opencode'].includes(flavor)) {
+    lines.push(`推理强度: ${formatReasoningEffort(session, flavor)}`)
+  }
   if (meta.flavor === 'codex') lines.push(`协作模式: ${session.collaborationMode || 'default'}`)
   return lines.join('\n')
 }

@@ -217,6 +217,8 @@ export class SseListener {
       'modelMode',
       'model',
       'modelReasoningEffort',
+      'effectiveModelReasoningEffort',
+      'supportedModelReasoningEfforts',
       'effort',
       'collaborationMode',
     ]) {
@@ -483,9 +485,9 @@ export class SseListener {
 
   async refreshSessionDetail(sid) {
     try {
-      const detail = await ops.fetchSessionDetail(this.client, sid)
+      const detail = await ops.fetchSessionRuntimeDetail(this.client, sid)
       this.updateSessionCache(sid, detail)
-      return detail
+      return this.sessions.find(item => item.id === sid) || detail
     } catch (err) {
       logger.warn(`[hapi-connector] 获取 session 详情失败: ${err.message || err}`)
       return null

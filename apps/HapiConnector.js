@@ -473,7 +473,7 @@ export class HapiConnector extends plugin {
   async cmdStatus(e) {
     const sid = State.currentSid(e)
     if (!sid) return this.reply('请先用 #hapi sw <序号> 选择一个 session')
-    const detail = await ops.fetchSessionDetail(this.client, sid)
+    const detail = await ops.fetchSessionRuntimeDetail(this.client, sid)
     return this.reply(formatSessionStatus(detail))
   }
 
@@ -1121,16 +1121,48 @@ export class HapiConnector extends plugin {
     const detail = await ops.fetchSessionDetail(this.client, sid)
     const flavor = detail.metadata?.flavor || 'claude'
     if (!['claude', 'codex', 'opencode'].includes(flavor)) return this.reply('推理强度仅支持 Claude / Codex / OpenCode session')
-    const values = flavor === 'opencode' ? OPENCODE_EFFORTS : flavor === 'codex' ? CODEX_EFFORTS : CLAUDE_EFFORTS
-    const labels = values.map(item => item || (flavor === 'claude' ? 'auto' : 'inherit'))
+
+    let options = staticEffortOptions(flavor)
+    let currentEffort = currentSessionEffort(detail, flavor)
+
+    if (flavor === 'opencode') {
+      try {
+        const data = await ops.fetchOpencodeReasoningEffortOptions(this.client, sid)
+        const discovered = normalizeEffortOptions(data?.options)
+        if (data?.success !== false && discovered.length) {
+          options = withInheritedEffort(discovered, flavor)
+        }
+        currentEffort = String(data?.currentValue || '').trim() || currentEffort
+      } catch {
+        // 兼容旧版 HAPI、inactive session 和尚未完成 ACP 能力发现的会话。
+      }
+    } else if (flavor === 'codex') {
+      try {
+        const data = await ops.fetchCodexModels(this.client, sid)
+        const models = normalizeCodexModels(data?.models)
+        const modelId = String(detail.model || detail.modelMode || detail.model_mode || '').trim()
+        const currentModel = models.find(model => model.id === modelId)
+          || models.find(model => model.isDefault)
+        const discovered = normalizeEffortOptions(currentModel?.supportedReasoningEfforts)
+        if (discovered.length) options = withInheritedEffort(discovered, flavor)
+        if (!detail.modelReasoningEffort && !detail.model_reasoning_effort) {
+          currentEffort = currentModel?.defaultReasoningEffort || currentEffort
+        }
+      } catch {
+        // 模型能力发现失败时使用静态兼容列表。
+      }
+    }
+
     if (!arg) {
-      arg = await this.awaitSettingArg(e, `可用推理强度: ${labels.join(', ')}\n请在 120 秒内发送要切换的值，发送“取消”退出`)
+      const choices = options.map((item, idx) => `${idx + 1}. ${item.label}`).join('\n')
+      arg = await this.awaitSettingArg(e, `当前推理强度: ${currentEffort}\n可用:\n${choices}\n请在 120 秒内发送编号或推理强度，发送“取消”退出`)
       if (!arg) return true
     }
-    const lowerArg = String(arg || '').trim().toLowerCase()
-    const normalized = ['inherit', 'auto', 'default'].includes(lowerArg) ? '' : lowerArg
-    if (!values.includes(normalized) && !(normalized === '' && values.includes('default'))) return this.reply(`无效值：${arg}`)
-    const [, msg] = await ops.setEffort(this.client, sid, normalized, flavor)
+    const target = resolveEffortChoice(arg, options)
+    if (target === undefined) {
+      return this.reply(`无效值：${arg}\n可用: ${options.map(item => item.value || item.label).join(', ')}`)
+    }
+    const [, msg] = await ops.setEffort(this.client, sid, target, flavor)
     return this.reply(msg)
   }
 
@@ -1409,7 +1441,16 @@ export class HapiConnector extends plugin {
 
   async fetchSessionHeaderDetail(sid) {
     try {
-      return await ops.fetchSessionDetail(this.client, sid)
+      const detail = await ops.fetchSessionRuntimeDetail(this.client, sid)
+      const cached = sessionsCache.find(item => item.id === sid)
+      if (!cached) {
+        sessionsCache.push(detail)
+        return detail
+      }
+      Object.assign(cached, detail, {
+        metadata: { ...(cached.metadata || {}), ...(detail.metadata || {}) },
+      })
+      return cached
     } catch (err) {
       logger.warn(`[hapi-connector] 获取 session 详情失败: ${err.message || err}`)
       return sessionsCache.find(item => item.id === sid) || null
@@ -1552,6 +1593,10 @@ function normalizeCodexModels(models) {
       id,
       displayName: displayName && displayName !== id ? displayName : '',
       isDefault: item?.isDefault === true,
+      defaultReasoningEffort: String(item?.defaultReasoningEffort || '').trim(),
+      supportedReasoningEfforts: Array.isArray(item?.supportedReasoningEfforts)
+        ? item.supportedReasoningEfforts.map(value => String(value || '').trim()).filter(Boolean)
+        : [],
     })
   }
   return out
@@ -1596,6 +1641,69 @@ function resolveOpencodeModelChoice(input, models) {
   const raw = String(input || '').trim()
   if (/^\d+$/.test(raw)) return models[Number(raw) - 1]?.modelId || ''
   return models.find(model => model.modelId === raw)?.modelId || ''
+}
+
+function staticEffortOptions(flavor) {
+  const values = flavor === 'opencode'
+    ? OPENCODE_EFFORTS
+    : flavor === 'codex'
+      ? CODEX_EFFORTS
+      : CLAUDE_EFFORTS
+  return normalizeEffortOptions(values, flavor)
+}
+
+function normalizeEffortOptions(values, flavor = '') {
+  if (!Array.isArray(values)) return []
+  const options = []
+  const seen = new Set()
+  for (const item of values) {
+    const rawValue = typeof item === 'object' && item !== null ? item.value : item
+    const rawName = typeof item === 'object' && item !== null ? item.name : ''
+    let value = String(rawValue ?? '').trim()
+    if (['inherit', 'auto', 'default'].includes(value.toLowerCase())) value = ''
+    const key = value.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    const name = String(rawName || '').trim()
+    const fallback = value || (flavor === 'claude' ? 'auto' : '继承默认')
+    const label = name && name.toLowerCase() !== value.toLowerCase()
+      ? `${name} (${value})`
+      : fallback
+    options.push({ value, label, name })
+  }
+  return options
+}
+
+function withInheritedEffort(options, flavor) {
+  return [
+    { value: '', label: flavor === 'claude' ? 'auto' : '继承默认', name: '' },
+    ...options.filter(item => item.value),
+  ]
+}
+
+function currentSessionEffort(detail, flavor) {
+  const current = String(
+    detail.effectiveModelReasoningEffort
+      || detail.modelReasoningEffort
+      || detail.model_reasoning_effort
+      || detail.effort
+      || '',
+  ).trim()
+  if (current) return current
+  return flavor === 'claude' ? 'auto' : '继承默认'
+}
+
+function resolveEffortChoice(input, options) {
+  const raw = String(input || '').trim()
+  if (/^\d+$/.test(raw)) return options[Number(raw) - 1]?.value
+  const lower = raw.toLowerCase()
+  if (['inherit', 'auto', 'default', '继承默认'].includes(lower)) return ''
+  const found = options.find(item => (
+    item.value.toLowerCase() === lower
+    || item.name?.toLowerCase() === lower
+    || item.label.toLowerCase() === lower
+  ))
+  return found?.value
 }
 
 function formatMachineChoices(machines) {

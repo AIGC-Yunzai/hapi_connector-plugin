@@ -7,6 +7,9 @@
   "main": "index.js",
   "type": "module",
   "module": "index.js",
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
   "keywords": [
     "Yunzai-Bot",
     "HAPI",

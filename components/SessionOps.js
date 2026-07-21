@@ -12,8 +12,81 @@ export async function fetchOpencodeModels(client, sid) {
   return client.requestJson('GET', `/api/sessions/${sid}/opencode-models`)
 }
 
+export async function fetchOpencodeReasoningEffortOptions(client, sid) {
+  return client.requestJson('GET', `/api/sessions/${sid}/opencode-reasoning-effort-options`)
+}
+
 export async function fetchCodexModels(client, sid) {
   return client.requestJson('GET', `/api/sessions/${sid}/codex-models`)
+}
+
+/**
+ * 获取用于展示的 session 运行时详情。
+ *
+ * HAPI 的 session.modelReasoningEffort 表示显式覆盖；当 OpenCode/Codex
+ * 继承后端默认值时它会是 null，因此需要从各自的能力接口补全实际值。
+ * 能力接口只对 active session 可用，旧版 HAPI 也可能没有这些路由；
+ * 补全失败时保留原始详情，避免影响消息和审批通知。
+ */
+export async function fetchSessionRuntimeDetail(client, sid) {
+  const detail = await fetchSessionDetail(client, sid)
+  const flavor = String(detail?.metadata?.flavor || '').toLowerCase()
+
+  if (flavor === 'opencode') {
+    try {
+      const data = await fetchOpencodeReasoningEffortOptions(client, sid)
+      if (data?.success !== false) {
+        const currentValue = cleanString(data?.currentValue)
+        const supported = normalizeEffortValues(data?.options)
+        if (currentValue) detail.effectiveModelReasoningEffort = currentValue
+        if (supported.length) detail.supportedModelReasoningEfforts = supported
+      }
+    } catch {
+      // 兼容旧版 HAPI、inactive session，以及 ACP 尚未完成能力发现的情况。
+    }
+  } else if (flavor === 'codex' && !cleanString(
+    detail?.modelReasoningEffort,
+    detail?.model_reasoning_effort,
+  )) {
+    try {
+      const data = await fetchCodexModels(client, sid)
+      const models = Array.isArray(data?.models) ? data.models : []
+      const modelId = cleanString(detail?.model, detail?.modelMode, detail?.model_mode)
+      const current = models.find(item => cleanString(item?.id) === modelId)
+        || models.find(item => item?.isDefault === true)
+      const defaultEffort = cleanString(current?.defaultReasoningEffort)
+      const supported = normalizeEffortValues(current?.supportedReasoningEfforts)
+      if (defaultEffort) detail.effectiveModelReasoningEffort = defaultEffort
+      if (supported.length) detail.supportedModelReasoningEfforts = supported
+    } catch {
+      // Codex 模型发现失败时继续显示“继承默认”。
+    }
+  }
+
+  return detail
+}
+
+function cleanString(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue
+    const text = String(value).trim()
+    if (text) return text
+  }
+  return ''
+}
+
+function normalizeEffortValues(values) {
+  if (!Array.isArray(values)) return []
+  const out = []
+  const seen = new Set()
+  for (const item of values) {
+    const rawValue = item && typeof item === 'object' ? item.value : item
+    const value = cleanString(rawValue)
+    if (!value || seen.has(value)) continue
+    seen.add(value)
+    out.push(value)
+  }
+  return out
 }
 
 export async function fetchMachineCodexModels(client, machineId) {
