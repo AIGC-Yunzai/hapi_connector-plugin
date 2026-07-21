@@ -271,15 +271,15 @@ function formatRequestFull(req) {
 export function formatRequestNodes(sid, req, total, sessions, config = {}) {
   const label = config?.more_session_info ? sessionLabelWithRuntime(sid, sessions) : sessionLabel(sid, sessions)
   const question = isQuestionRequest(req)
-  const cmdLines = [
+  const cmdNode = [
     `当前共 ${total} 个待审批`,
     question ? `#hapi answer ${req.index} <答案>` : `#hapi allow ${req.index}`,
     ...(question ? [] : [`#hapi as ${req.index} 本会话允许`]),
     '#hapi a 批准全部普通请求',
     '#hapi deny 拒绝',
-  ]
-  if (config.enable_poke_approve) cmdLines.push('“戳一戳我”批准全部普通请求')
-  const cmdNode = cmdLines.join('\n')
+  ].join('\n')
+  // 戳一戳提示单独占一个转发节点；仅在配置开启戳一戳审核时展示
+  const pokeNode = config.enable_poke_approve ? '“戳一戳我”批准全部普通请求' : ''
 
   if (question) {
     const questions = parseQuestions(req)
@@ -300,10 +300,13 @@ export function formatRequestNodes(sid, req, total, sessions, config = {}) {
       nodes.push(formatRequestDetail(req))
     }
     nodes.push(cmdNode)
+    if (pokeNode) nodes.push(pokeNode)
     return nodes
   }
 
-  return [`权限请求 #${req.index}\n${label}`, formatRequestFull(req), cmdNode]
+  const nodes = [`权限请求 #${req.index}\n${label}`, formatRequestFull(req), cmdNode]
+  if (pokeNode) nodes.push(pokeNode)
+  return nodes
 }
 
 
