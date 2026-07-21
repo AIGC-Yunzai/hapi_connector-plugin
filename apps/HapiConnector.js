@@ -622,7 +622,7 @@ export class HapiConnector extends plugin {
     if (!directory) return true
 
     const agents = ['claude', 'codex', 'gemini', 'grok', 'opencode']
-    const agent = await this.awaitChoiceArg(e, '请选择 agent：\n1. claude\n2. codex\n3. gemini\n4. grok (Grok Build)\n5. opencode', agents, parts[argOffset + 1])
+    const agent = await this.awaitChoiceArg(e, '请选择 agent：\n1. claude\n2. codex\n3. gemini\n4. grok\n5. opencode', agents, parts[argOffset + 1])
     if (!agent) return true
 
     const sessionType = await this.awaitChoiceArg(e, '请选择 session 类型：\n1. simple\n2. worktree', ['simple', 'worktree'], parts[argOffset + 2], 'simple')
@@ -1748,7 +1748,7 @@ function dynamicModelProfile(flavor) {
   }
   if (flavor === 'grok') {
     return {
-      label: 'Grok Build',
+      label: 'Grok',
       idLabel: 'modelId',
       listKey: 'availableModels',
       normalize: normalizeGrokModels,
