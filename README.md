@@ -138,7 +138,7 @@ access_token: "your-token"
 #### `create` 的完整格式：
 
 ```text
-#hapi create <machineId> <目录> <claude|codex|gemini|opencode> [simple|worktree] [模型] [推理强度] [权限模式] [yolo]
+#hapi create <machineId> <目录> <claude|codex|gemini|grok|opencode> [simple|worktree] [模型] [推理强度] [权限模式] [yolo]
 示例：
 #hapi create my-pc E:/myrepo/project codex simple yolo high
 #hapi create my-pc E:/myrepo/project claude simple opus high bypassPermissions

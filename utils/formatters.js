@@ -4,6 +4,7 @@ export const PERMISSION_MODES = {
   claude: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
   codex: ['default', 'read-only', 'safe-yolo', 'yolo'],
   gemini: ['default', 'read-only', 'safe-yolo', 'yolo'],
+  grok: ['default', 'auto', 'plan', 'bypassPermissions'],
   opencode: ['default', 'plan', 'yolo'],
 }
 
@@ -11,6 +12,7 @@ export const MODEL_MODES = ['default', 'sonnet', 'sonnet[1m]', 'opus', 'opus[1m]
 export const GEMINI_MODEL_MODES = ['default', 'flash', 'pro']
 export const CLAUDE_EFFORTS = ['', 'medium', 'high', 'max']
 export const CODEX_EFFORTS = ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh']
+export const GROK_EFFORTS = ['', 'low', 'medium', 'high', 'xhigh']
 export const OPENCODE_EFFORTS = ['default', 'low', 'medium', 'high', 'max']
 
 export function extractTextPreview(content, maxLen = 0) {
@@ -113,6 +115,7 @@ function formatReasoningEffort(session, flavor = '') {
   if (modelReasoningEffort) return modelReasoningEffort
   if (effort) return effort
   if (flavor === 'claude') return 'auto'
+  if (flavor === 'grok') return 'default'
   if (['codex', 'opencode'].includes(flavor)) return '继承默认'
   return 'default'
 }
@@ -208,7 +211,7 @@ export function formatSessionStatus(session) {
     `权限模式: ${session.permissionMode || 'default'}`,
     `模型:     ${firstNonEmpty(session.model, session.modelMode, session.model_mode) || 'default'}`,
   ]
-  if (['claude', 'codex', 'opencode'].includes(flavor)) {
+  if (['claude', 'codex', 'grok', 'opencode'].includes(flavor)) {
     lines.push(`推理强度: ${formatReasoningEffort(session, flavor)}`)
   }
   if (meta.flavor === 'codex') lines.push(`协作模式: ${session.collaborationMode || 'default'}`)

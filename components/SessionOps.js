@@ -20,11 +20,20 @@ export async function fetchCodexModels(client, sid) {
   return client.requestJson('GET', `/api/sessions/${sid}/codex-models`)
 }
 
+export async function fetchGrokModels(client, sid) {
+  return client.requestJson('GET', `/api/sessions/${sid}/grok-models`)
+}
+
+export async function fetchGrokReasoningEffortOptions(client, sid) {
+  return client.requestJson('GET', `/api/sessions/${sid}/grok-reasoning-effort-options`)
+}
+
 /**
  * 获取用于展示的 session 运行时详情。
  *
  * HAPI 的 session.modelReasoningEffort 表示显式覆盖；当 OpenCode/Codex
  * 继承后端默认值时它会是 null，因此需要从各自的能力接口补全实际值。
+ * Grok 使用 session.effort，也可从 grok-reasoning-effort-options 补全。
  * 能力接口只对 active session 可用，旧版 HAPI 也可能没有这些路由；
  * 补全失败时保留原始详情，避免影响消息和审批通知。
  */
@@ -35,6 +44,18 @@ export async function fetchSessionRuntimeDetail(client, sid) {
   if (flavor === 'opencode') {
     try {
       const data = await fetchOpencodeReasoningEffortOptions(client, sid)
+      if (data?.success !== false) {
+        const currentValue = cleanString(data?.currentValue)
+        const supported = normalizeEffortValues(data?.options)
+        if (currentValue) detail.effectiveModelReasoningEffort = currentValue
+        if (supported.length) detail.supportedModelReasoningEfforts = supported
+      }
+    } catch {
+      // 兼容旧版 HAPI、inactive session，以及 ACP 尚未完成能力发现的情况。
+    }
+  } else if (flavor === 'grok' && !cleanString(detail?.effort)) {
+    try {
+      const data = await fetchGrokReasoningEffortOptions(client, sid)
       if (data?.success !== false) {
         const currentValue = cleanString(data?.currentValue)
         const supported = normalizeEffortValues(data?.options)
@@ -95,6 +116,10 @@ export async function fetchMachineCodexModels(client, machineId) {
 
 export async function fetchMachineOpencodeModels(client, machineId, cwd) {
   return client.requestJson('GET', `/api/machines/${machineId}/opencode-models`, { params: { cwd } })
+}
+
+export async function fetchMachineGrokModels(client, machineId, cwd) {
+  return client.requestJson('GET', `/api/machines/${machineId}/grok-models`, { params: { cwd } })
 }
 
 export async function fetchMessages(client, sid, limit = 10) {
@@ -221,7 +246,13 @@ export async function setEffort(client, sid, effort, flavor) {
   const route = isModelReasoningEffort ? 'model-reasoning-effort' : 'effort'
   const key = isModelReasoningEffort ? 'modelReasoningEffort' : 'effort'
   const res = await client.post(`/api/sessions/${sid}/${route}`, { json: { [key]: effort || null } })
-  const label = effort || (isModelReasoningEffort ? '继承默认' : 'auto')
+  const label = effort || (
+    isModelReasoningEffort
+      ? '继承默认'
+      : flavor === 'grok'
+        ? 'default'
+        : 'auto'
+  )
   if (res.ok) return [true, `推理强度已切换为: ${label}`]
   return [false, `切换失败: ${res.status} ${(await res.text()).slice(0, 200)}`]
 }

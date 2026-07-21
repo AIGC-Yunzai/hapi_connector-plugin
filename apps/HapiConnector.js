@@ -28,6 +28,7 @@ import {
   CLAUDE_EFFORTS,
   CODEX_EFFORTS,
   GEMINI_MODEL_MODES,
+  GROK_EFFORTS,
   MODEL_MODES,
   OPENCODE_EFFORTS,
   PERMISSION_MODES,
@@ -620,8 +621,8 @@ export class HapiConnector extends plugin {
     const directory = parts[argOffset] || await this.selectMachineDirectory(e, machine)
     if (!directory) return true
 
-    const agents = ['claude', 'codex', 'gemini', 'opencode']
-    const agent = await this.awaitChoiceArg(e, '请选择 agent：\n1. claude\n2. codex\n3. gemini\n4. opencode', agents, parts[argOffset + 1])
+    const agents = ['claude', 'codex', 'gemini', 'grok', 'opencode']
+    const agent = await this.awaitChoiceArg(e, '请选择 agent：\n1. claude\n2. codex\n3. gemini\n4. grok (Grok Build)\n5. opencode', agents, parts[argOffset + 1])
     if (!agent) return true
 
     const sessionType = await this.awaitChoiceArg(e, '请选择 session 类型：\n1. simple\n2. worktree', ['simple', 'worktree'], parts[argOffset + 2], 'simple')
@@ -642,15 +643,23 @@ export class HapiConnector extends plugin {
       const model = await this.awaitChoiceArg(e, `请选择模型，发送“跳过”使用默认：\n${modelModes.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`, modelModes, '', '')
       if (model === null) return true
       createOptions.model = model
-    } else if (['codex', 'opencode'].includes(flavor)) {
+    } else if (['codex', 'grok', 'opencode'].includes(flavor)) {
       const model = await this.awaitCreateDynamicModel(e, flavor, selectedMachineId, directory)
       if (model === null) return true
       createOptions.model = model
     }
 
-    const efforts = flavor === 'opencode' ? OPENCODE_EFFORTS : flavor === 'codex' ? CODEX_EFFORTS : flavor === 'claude' ? CLAUDE_EFFORTS : []
+    const efforts = flavor === 'opencode'
+      ? OPENCODE_EFFORTS
+      : flavor === 'codex'
+        ? CODEX_EFFORTS
+        : flavor === 'grok'
+          ? GROK_EFFORTS
+          : flavor === 'claude'
+            ? CLAUDE_EFFORTS
+            : []
     if (efforts.length) {
-      const labels = efforts.map(item => item || (flavor === 'codex' ? 'inherit' : 'auto'))
+      const labels = efforts.map(item => item || (flavor === 'codex' ? 'inherit' : defaultEffortLabel(flavor)))
       const effort = await this.awaitChoiceArg(e, `请选择推理强度，发送“跳过”使用默认：\n${labels.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`, labels, '', '')
       if (effort === null) return true
       createOptions.effort = ['inherit', 'auto', 'default'].includes(effort) ? '' : effort
@@ -661,7 +670,7 @@ export class HapiConnector extends plugin {
       const permission = await this.awaitChoiceArg(e, `请选择权限模式，发送“跳过”使用默认：\n${permissionModes.map((item, idx) => `${idx + 1}. ${item}`).join('\n')}`, permissionModes, '', '')
       if (permission === null) return true
       createOptions.permission = permission
-      if (permission === 'yolo') createOptions.yolo = true
+      if (permission === 'yolo' || permission === 'bypassPermissions') createOptions.yolo = true
     }
 
     return this.createSession(e, selectedMachineId, directory, agent, createOptions)
@@ -677,7 +686,10 @@ export class HapiConnector extends plugin {
     }
     if (createOptions.model && createOptions.model !== 'default') payload.model = createOptions.model
     if (createOptions.effort && ['codex', 'opencode'].includes(flavor)) payload.modelReasoningEffort = createOptions.effort
-    if (createOptions.effort && flavor === 'claude') payload.effort = createOptions.effort
+    if (createOptions.effort && ['claude', 'grok'].includes(flavor)) payload.effort = createOptions.effort
+    if (createOptions.permission && !['default', 'yolo'].includes(createOptions.permission)) {
+      payload.permissionMode = createOptions.permission
+    }
     const [ok, msg, sid] = await ops.spawnSession(this.client, machineId, payload)
     await this.reply(msg)
     if (ok && sid) {
@@ -784,21 +796,19 @@ export class HapiConnector extends plugin {
   }
 
   async awaitCreateDynamicModel(e, flavor, machineId, directory) {
-    const isCodex = flavor === 'codex'
-    const label = isCodex ? 'Codex' : 'OpenCode'
-    const idLabel = isCodex ? 'model id' : 'modelId'
-    const normalize = isCodex ? normalizeCodexModels : normalizeOpencodeModels
-    const format = isCodex ? formatCodexModelChoices : formatOpencodeModelChoices
-    const resolve = isCodex ? resolveCodexModelChoice : resolveOpencodeModelChoice
+    const profile = dynamicModelProfile(flavor)
+    if (!profile) return ''
 
     let models = []
     let error = ''
     try {
-      const data = isCodex
+      const data = flavor === 'codex'
         ? await ops.fetchMachineCodexModels(this.client, machineId)
-        : await ops.fetchMachineOpencodeModels(this.client, machineId, directory)
+        : flavor === 'grok'
+          ? await ops.fetchMachineGrokModels(this.client, machineId, directory)
+          : await ops.fetchMachineOpencodeModels(this.client, machineId, directory)
       if (data?.success) {
-        models = normalize(isCodex ? data.models : data.availableModels)
+        models = profile.normalize(profile.listKey === 'models' ? data.models : data.availableModels)
       } else {
         error = data?.error || '未知错误'
       }
@@ -806,12 +816,12 @@ export class HapiConnector extends plugin {
       error = err.message || String(err)
     }
 
-    const choices = models.length ? format(models) : ''
+    const choices = models.length ? profile.format(models) : ''
     const prompt = models.length
-      ? `请选择 ${label} 模型，发送“跳过”使用默认：\n${choices}`
+      ? `请选择 ${profile.label} 模型，发送“跳过”使用默认：\n${choices}`
       : [
-          `获取 ${label} 模型列表失败: ${error || '未返回可用模型'}`,
-          `可直接发送完整 ${idLabel}，或发送“跳过”使用默认：`,
+          `获取 ${profile.label} 模型列表失败: ${error || '未返回可用模型'}`,
+          `可直接发送完整 ${profile.idLabel}，或发送“跳过”使用默认：`,
         ].join('\n')
 
     while (true) {
@@ -821,7 +831,7 @@ export class HapiConnector extends plugin {
 
       if (!models.length) return input
 
-      const target = resolve(input, models)
+      const target = profile.resolve(input, models)
       if (target) return target
       await this.reply(`无效模型：${input}\n可用:\n${choices}\n发送“跳过”使用默认值。`)
     }
@@ -1103,8 +1113,33 @@ export class HapiConnector extends plugin {
       return this.reply(msg)
     }
 
+    if (flavor === 'grok') {
+      let data
+      try {
+        data = await ops.fetchGrokModels(this.client, sid)
+      } catch (err) {
+        return this.reply(`获取 Grok 模型失败: ${err.message || err}`)
+      }
+      if (!data?.success) return this.reply(`获取 Grok 模型失败: ${data?.error || '未知错误'}`)
+
+      const models = normalizeGrokModels(data.availableModels)
+      if (!models.length) return this.reply('Grok 未返回可用模型列表')
+
+      const choices = formatGrokModelChoices(models)
+      const currentModel = data.currentModelId || detail.model || detail.modelMode || 'default'
+      if (!arg) {
+        arg = await this.awaitSettingArg(e, `当前模型: ${currentModel}\n可用:\n${choices}\n请在 120 秒内发送要切换的模型编号或完整 modelId，发送“取消”退出`)
+        if (!arg) return true
+      }
+
+      const target = resolveGrokModelChoice(arg, models)
+      if (!target) return this.reply(`无效模型：${arg}\n可用:\n${choices}`)
+      const [, msg] = await ops.setModelMode(this.client, sid, target)
+      return this.reply(msg)
+    }
+
     const modes = flavor === 'gemini' ? GEMINI_MODEL_MODES : MODEL_MODES
-    if (!['claude', 'gemini'].includes(flavor)) return this.reply('模型切换仅支持 Claude / Gemini / Codex / OpenCode session')
+    if (!['claude', 'gemini'].includes(flavor)) return this.reply('模型切换仅支持 Claude / Gemini / Codex / Grok / OpenCode session')
     if (!arg) {
       arg = await this.awaitSettingArg(e, `当前模型: ${detail.modelMode || 'default'}\n可用: ${modes.join(', ')}\n请在 120 秒内发送要切换的模型，发送“取消”退出`)
       if (!arg) return true
@@ -1120,7 +1155,7 @@ export class HapiConnector extends plugin {
     if (!sid) return this.reply('请先选择 session')
     const detail = await ops.fetchSessionDetail(this.client, sid)
     const flavor = detail.metadata?.flavor || 'claude'
-    if (!['claude', 'codex', 'opencode'].includes(flavor)) return this.reply('推理强度仅支持 Claude / Codex / OpenCode session')
+    if (!['claude', 'codex', 'grok', 'opencode'].includes(flavor)) return this.reply('推理强度仅支持 Claude / Codex / Grok / OpenCode session')
 
     let options = staticEffortOptions(flavor)
     let currentEffort = currentSessionEffort(detail, flavor)
@@ -1128,7 +1163,18 @@ export class HapiConnector extends plugin {
     if (flavor === 'opencode') {
       try {
         const data = await ops.fetchOpencodeReasoningEffortOptions(this.client, sid)
-        const discovered = normalizeEffortOptions(data?.options)
+        const discovered = normalizeEffortOptions(data?.options, flavor)
+        if (data?.success !== false && discovered.length) {
+          options = withInheritedEffort(discovered, flavor)
+        }
+        currentEffort = String(data?.currentValue || '').trim() || currentEffort
+      } catch {
+        // 兼容旧版 HAPI、inactive session 和尚未完成 ACP 能力发现的会话。
+      }
+    } else if (flavor === 'grok') {
+      try {
+        const data = await ops.fetchGrokReasoningEffortOptions(this.client, sid)
+        const discovered = normalizeEffortOptions(data?.options, flavor)
         if (data?.success !== false && discovered.length) {
           options = withInheritedEffort(discovered, flavor)
         }
@@ -1143,7 +1189,7 @@ export class HapiConnector extends plugin {
         const modelId = String(detail.model || detail.modelMode || detail.model_mode || '').trim()
         const currentModel = models.find(model => model.id === modelId)
           || models.find(model => model.isDefault)
-        const discovered = normalizeEffortOptions(currentModel?.supportedReasoningEfforts)
+        const discovered = normalizeEffortOptions(currentModel?.supportedReasoningEfforts, flavor)
         if (discovered.length) options = withInheritedEffort(discovered, flavor)
         if (!detail.modelReasoningEffort && !detail.model_reasoning_effort) {
           currentEffort = currentModel?.defaultReasoningEffort || currentEffort
@@ -1188,12 +1234,12 @@ export class HapiConnector extends plugin {
       const [, msg] = await ops.setCollaborationMode(this.client, sid, next)
       return this.reply(msg)
     }
-    if (['claude', 'opencode'].includes(flavor)) {
+    if (['claude', 'grok', 'opencode'].includes(flavor)) {
       const next = detail.permissionMode === 'plan' ? 'default' : 'plan'
       const [, msg] = await ops.setPermissionMode(this.client, sid, next)
       return this.reply(msg)
     }
-    return this.reply('Plan 模式仅支持 Claude / Codex / OpenCode session')
+    return this.reply('Plan 模式仅支持 Claude / Codex / Grok / OpenCode session')
   }
 
   async cmdOutput(e, arg) {
@@ -1213,14 +1259,16 @@ export class HapiConnector extends plugin {
     const parts = splitArgs(arg)
     const action = (parts[0] || '').toLowerCase()
     const cleanTarget = (parts[1] || '').toLowerCase()
+    const flavors = ['claude', 'codex', 'gemini', 'grok', 'opencode']
+    const flavorHint = flavors.join('|')
     if (!action) {
-      return this.reply('用法：#hapi bind <claude|codex|gemini|opencode|all|status|reset> / #hapi bind clean <all|claude|codex|gemini|opencode>')
+      return this.reply(`用法：#hapi bind <${flavorHint}|all|status|reset> / #hapi bind clean <all|${flavorHint}>`)
     }
     if (action === 'all') {
       State.bindPrimary(e)
       return this.reply('已设置当前聊天为默认通知窗口\n所有未绑定的Hapi session都将推送到此窗口')
     }
-    if (['claude', 'codex', 'gemini', 'opencode'].includes(action)) {
+    if (flavors.includes(action)) {
       State.bindPrimary(e, action)
       return this.reply(`已设置当前聊天为 ${action} 默认通知窗口`)
     }
@@ -1229,9 +1277,8 @@ export class HapiConnector extends plugin {
       return this.reply('已清空当前窗口的 session 绑定和窗口状态')
     }
     if (action === 'clean') {
-      const flavors = ['claude', 'codex', 'gemini', 'opencode']
       if (!cleanTarget || parts.length > 2 || !['all', ...flavors].includes(cleanTarget)) {
-        return this.reply('用法：#hapi bind clean <all|claude|codex|gemini|opencode>')
+        return this.reply(`用法：#hapi bind clean <all|${flavorHint}>`)
       }
       if (cleanTarget === 'all') {
         State.cleanDefaultBindings(e)
@@ -1241,7 +1288,7 @@ export class HapiConnector extends plugin {
       return this.reply(`已清除当前用户的 ${cleanTarget} 默认通知窗口配置`)
     }
     if (action === 'status') return this.cmdRoutes(e)
-    return this.reply('用法：#hapi bind <claude|codex|gemini|opencode|all|status|reset> / #hapi bind clean <all|claude|codex|gemini|opencode>')
+    return this.reply(`用法：#hapi bind <${flavorHint}|all|status|reset> / #hapi bind clean <all|${flavorHint}>`)
   }
 
   async cmdRoutes(e) {
@@ -1643,12 +1690,99 @@ function resolveOpencodeModelChoice(input, models) {
   return models.find(model => model.modelId === raw)?.modelId || ''
 }
 
+function normalizeGrokModels(models) {
+  if (!Array.isArray(models)) return []
+  const seen = new Set()
+  const out = []
+  for (const item of models) {
+    const modelId = String(item?.modelId || '').trim()
+    if (!modelId || seen.has(modelId)) continue
+    seen.add(modelId)
+    const name = String(item?.name || '').trim()
+    const reasoningEfforts = Array.isArray(item?.reasoningEfforts)
+      ? item.reasoningEfforts
+        .map(effort => {
+          if (typeof effort === 'string') return { value: effort.trim(), name: '' }
+          const value = String(effort?.value || '').trim()
+          if (!value) return null
+          return {
+            value,
+            name: String(effort?.name || '').trim(),
+            isDefault: effort?.isDefault === true,
+          }
+        })
+        .filter(Boolean)
+      : []
+    out.push({
+      modelId,
+      name: name && name !== modelId ? name : '',
+      reasoningEfforts,
+    })
+  }
+  return out
+}
+
+function formatGrokModelChoices(models) {
+  return models.map((model, idx) => {
+    const label = model.name ? `${model.name} (${model.modelId})` : model.modelId
+    return `${idx + 1}. ${label}`
+  }).join('\n')
+}
+
+function resolveGrokModelChoice(input, models) {
+  const raw = String(input || '').trim()
+  if (/^\d+$/.test(raw)) return models[Number(raw) - 1]?.modelId || ''
+  return models.find(model => model.modelId === raw)?.modelId || ''
+}
+
+function dynamicModelProfile(flavor) {
+  if (flavor === 'codex') {
+    return {
+      label: 'Codex',
+      idLabel: 'model id',
+      listKey: 'models',
+      normalize: normalizeCodexModels,
+      format: formatCodexModelChoices,
+      resolve: resolveCodexModelChoice,
+    }
+  }
+  if (flavor === 'grok') {
+    return {
+      label: 'Grok Build',
+      idLabel: 'modelId',
+      listKey: 'availableModels',
+      normalize: normalizeGrokModels,
+      format: formatGrokModelChoices,
+      resolve: resolveGrokModelChoice,
+    }
+  }
+  if (flavor === 'opencode') {
+    return {
+      label: 'OpenCode',
+      idLabel: 'modelId',
+      listKey: 'availableModels',
+      normalize: normalizeOpencodeModels,
+      format: formatOpencodeModelChoices,
+      resolve: resolveOpencodeModelChoice,
+    }
+  }
+  return null
+}
+
+function defaultEffortLabel(flavor) {
+  if (flavor === 'claude') return 'auto'
+  if (flavor === 'grok') return 'default'
+  return '继承默认'
+}
+
 function staticEffortOptions(flavor) {
   const values = flavor === 'opencode'
     ? OPENCODE_EFFORTS
     : flavor === 'codex'
       ? CODEX_EFFORTS
-      : CLAUDE_EFFORTS
+      : flavor === 'grok'
+        ? GROK_EFFORTS
+        : CLAUDE_EFFORTS
   return normalizeEffortOptions(values, flavor)
 }
 
@@ -1665,7 +1799,7 @@ function normalizeEffortOptions(values, flavor = '') {
     if (seen.has(key)) continue
     seen.add(key)
     const name = String(rawName || '').trim()
-    const fallback = value || (flavor === 'claude' ? 'auto' : '继承默认')
+    const fallback = value || defaultEffortLabel(flavor)
     const label = name && name.toLowerCase() !== value.toLowerCase()
       ? `${name} (${value})`
       : fallback
@@ -1676,7 +1810,7 @@ function normalizeEffortOptions(values, flavor = '') {
 
 function withInheritedEffort(options, flavor) {
   return [
-    { value: '', label: flavor === 'claude' ? 'auto' : '继承默认', name: '' },
+    { value: '', label: defaultEffortLabel(flavor), name: '' },
     ...options.filter(item => item.value),
   ]
 }
@@ -1690,7 +1824,7 @@ function currentSessionEffort(detail, flavor) {
       || '',
   ).trim()
   if (current) return current
-  return flavor === 'claude' ? 'auto' : '继承默认'
+  return defaultEffortLabel(flavor)
 }
 
 function resolveEffortChoice(input, options) {
@@ -1821,9 +1955,17 @@ function normalizeModelInput(input) {
 function parseCreateOptions(agent, tokens = []) {
   const flavor = String(agent || '').toLowerCase()
   const modelModes = flavor === 'gemini' ? GEMINI_MODEL_MODES : flavor === 'claude' ? MODEL_MODES : []
-  const efforts = flavor === 'opencode' ? OPENCODE_EFFORTS : flavor === 'codex' ? CODEX_EFFORTS : flavor === 'claude' ? CLAUDE_EFFORTS : []
+  const efforts = flavor === 'opencode'
+    ? OPENCODE_EFFORTS
+    : flavor === 'codex'
+      ? CODEX_EFFORTS
+      : flavor === 'grok'
+        ? GROK_EFFORTS
+        : flavor === 'claude'
+          ? CLAUDE_EFFORTS
+          : []
   const permissionModes = PERMISSION_MODES[flavor] || []
-  const acceptsFreeModel = ['codex', 'opencode'].includes(flavor)
+  const acceptsFreeModel = ['codex', 'grok', 'opencode'].includes(flavor)
   const options = {
     sessionType: 'simple',
     yolo: false,
@@ -1840,6 +1982,11 @@ function parseCreateOptions(agent, tokens = []) {
     }
     if (['yolo', 'true', '1', '是'].includes(lower)) {
       options.yolo = true
+      if (permissionModes.includes('bypassPermissions') && !options.permission) {
+        options.permission = 'bypassPermissions'
+      } else if (permissionModes.includes('yolo') && !options.permission) {
+        options.permission = 'yolo'
+      }
       continue
     }
 
@@ -1860,6 +2007,7 @@ function parseCreateOptions(agent, tokens = []) {
     const permission = resolveChoice(token, permissionModes)
     if (permissionModes.includes(permission)) {
       options.permission = permission
+      if (permission === 'yolo' || permission === 'bypassPermissions') options.yolo = true
       continue
     }
 
