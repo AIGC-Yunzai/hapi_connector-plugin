@@ -104,7 +104,7 @@ enable_sse: true
 output_level: "simple"
 ```
 
-保存锅巴配置后，建议重启 TRSS-Yunzai，让连接、JWT 缓存和 SSE 监听完整刷新。
+保存锅巴配置后，连接器会自动清理 JWT 缓存并重启 SSE，无需重启 TRSS-Yunzai。
 
 ## 步骤四：验证连通性
 

@@ -38,7 +38,7 @@ export function supportGuoba() {
     helpItem('allow_session', '本会话允许单个普通请求', '#hapi as <序号>'),
     helpItem('answer', '回答 question 请求', '#hapi answer <序号> <答案>', 'question 请求不是普通聊天，普通对话用 #hapi to'),
     helpItem('deny', '拒绝全部或单个请求', '#hapi deny [序号]'),
-    helpItem('poke', '批准全部普通请求', '戳一戳机器人', '需开启「戳一戳审核」'),
+    helpItem('poke', '执行配置动作', '戳一戳机器人', '需开启「戳一戳动作」并在锅巴选择动作'),
     helpDivider('Session 管理'),
     helpItem('machines', '查看在线机器', '#hapi machines'),
     helpItem('create', '创建 session', '#hapi create <machineId> <目录> <agent> [simple|worktree] [模型] [推理强度] [权限模式] [yolo]', '不带完整参数进入分步向导'),
@@ -61,8 +61,9 @@ export function supportGuoba() {
     helpItem('model', '查看 / 切换模型', '#hapi model [模式]', '支持1M上下文的模型可以这么写 opus[1m]'),
     helpItem('effort', '查看 / 切换推理强度', '#hapi effort [值]'),
     helpItem('plan', '切换 Plan 模式', '#hapi plan'),
+    helpItem('fast', '切换 Codex Fast 模式', '#hapi fast [on|off|fast|standard]', '仅支持远程 Codex session'),
     helpItem('output', '查看 / 切换 SSE 推送级别', '#hapi output [级别]'),
-    helpItem('bind1', '默认通知窗口', '#hapi bind [claude|codex|gemini|grok|opencode|all]', '设置指定 flavor 或全部默认通知窗口'),
+    helpItem('bind1', '默认通知窗口', '#hapi bind [claude|codex|cursor|grok|kimi|opencode|pi|all]', '设置指定 flavor 或全部默认通知窗口'),
     helpItem('bind2', '默认通知窗口', '#hapi bind status  /  reset  /  clean <all|flavor>', '查看 / 清除默认通知窗口'),
     helpItem('routes', '查看 session 推送路由', '#hapi routes'),
   ]
@@ -77,7 +78,7 @@ export function supportGuoba() {
       isV3: true,
       isV2: false,
       showInMenu: true,
-      description: '通过云崽聊天窗口远程管理 HAPI / Claude Code / Codex / OpenCode / Gemini 会话',
+      description: '通过云崽聊天窗口远程管理 HAPI / Claude Code / Codex / Cursor / Grok / Kimi / OpenCode / Pi 会话',
       icon: 'mdi:console-network-outline',
       iconColor: '#2f855a',
     },
@@ -102,7 +103,7 @@ export function supportGuoba() {
           field: 'access_token',
           label: 'Access Token',
           component: 'InputPassword',
-          bottomHelpMessage: '支持 token:namespace 格式；修改后重启生效',
+          bottomHelpMessage: '支持 token:namespace 格式；修改后会清理旧 JWT 并自动重连',
         },
         {
           field: 'proxy_url',
@@ -235,9 +236,26 @@ export function supportGuoba() {
         },
         {
           field: 'enable_poke_approve',
-          label: '开启戳一戳审核',
+          label: '开启戳一戳动作',
           component: 'Switch',
-          bottomHelpMessage: '开启后，主人戳机器人会批准 HAPI 普通权限请求',
+          bottomHelpMessage: '开启后，主人戳机器人会执行下方选择的动作',
+        },
+        {
+          field: 'poke_action',
+          label: '戳一戳动作',
+          component: 'Select',
+          componentProps: {
+            options: [
+              { label: '批准普通待审请求', value: 'approve' },
+              { label: '查看待审', value: 'pending' },
+              { label: '查看会话列表', value: 'list' },
+              { label: '查看当前状态', value: 'status' },
+              { label: '中止当前 session', value: 'stop' },
+              { label: '循环切换推送级别', value: 'output_cycle' },
+              { label: '仅确认收到', value: 'none' },
+            ],
+          },
+          bottomHelpMessage: '不提供拒绝动作；question 请求仍需使用 #hapi answer 回答',
         },
         {
           field: 'auto_approve_enabled',
@@ -314,7 +332,7 @@ export function supportGuoba() {
           }
           config.hapi_endpoint = String(config.hapi_endpoint || '').replace(/\/+$/, '')
           Config.setConfig(config)
-          return Result.ok({}, '保存成功，请重启云崽以完整生效')
+          return Result.ok({}, '保存成功，连接与 SSE 配置会自动热更新')
         } catch (err) {
           return Result.error(`保存失败：${err.message || err}`)
         }

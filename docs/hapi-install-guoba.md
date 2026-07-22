@@ -6,7 +6,7 @@
 
 - 一台能运行 HAPI Hub 的机器，通常就是运行 TRSS-Yunzai 的服务器。
 - Node.js / pnpm 或 npm。
-- 已安装并能登录的 Claude Code / Codex / Gemini / OpenCode 之一。
+- 已安装并能登录的 Claude Code / Codex / Cursor / Grok / Kimi / OpenCode / Pi 之一。
 - 已安装本插件：`TRSS-Yunzai/plugins/hapi_connector-plugin`。
 
 ## 方式一：使用 Yunzai-Bot-Shell 菜单安装（仅限 Ubuntu）
@@ -188,14 +188,14 @@ access_token: "你的 cliApiToken"
 
 常见 `hapi_endpoint` 填法：
 
-| 场景 | 填写值 |
-| --- | --- |
-| TRSS-Yunzai 与 HAPI 在同一宿主机，非 Docker | `http://127.0.0.1:3006` 或 `http://localhost:3006` |
-| TRSS-Yunzai 在 Docker，HAPI 在 Linux 宿主机 | `http://172.17.0.1:3006` |
-| TRSS-Yunzai 在 Docker，HAPI 在 Windows/macOS 宿主机 | `http://host.docker.internal:3006` |
-| 同一局域网或 Tailscale | `http://<HAPI机器IP>:3006` |
-| 自建域名 / 反向代理 / Cloudflare Tunnel | `https://你的域名` |
-| HAPI 官方中继 | 使用 Hub 输出的可访问地址 |
+| 场景                                                | 填写值                                             |
+| --------------------------------------------------- | -------------------------------------------------- |
+| TRSS-Yunzai 与 HAPI 在同一宿主机，非 Docker         | `http://127.0.0.1:3006` 或 `http://localhost:3006` |
+| TRSS-Yunzai 在 Docker，HAPI 在 Linux 宿主机         | `http://172.17.0.1:3006`                           |
+| TRSS-Yunzai 在 Docker，HAPI 在 Windows/macOS 宿主机 | `http://host.docker.internal:3006`                 |
+| 同一局域网或 Tailscale                              | `http://<HAPI机器IP>:3006`                         |
+| 自建域名 / 反向代理 / Cloudflare Tunnel             | `https://你的域名`                                 |
+| HAPI 官方中继                                       | 使用 Hub 输出的可访问地址                          |
 
 Docker、局域网、Tailscale 场景通常需要先设置：
 
@@ -234,7 +234,7 @@ cf_access_client_secret: ""
 proxy_url: "http://127.0.0.1:7890"
 ```
 
-保存锅巴配置后，建议重启 TRSS-Yunzai，让连接和 SSE 监听完整生效。
+保存锅巴配置后，连接器会清理旧 JWT 并自动重启 SSE，无需重启 TRSS-Yunzai。
 
 ## 验证是否成功
 
@@ -287,7 +287,7 @@ proxy_url: "http://127.0.0.1:7890"
 
 ### 锅巴保存后没生效
 
-重启 TRSS-Yunzai。连接配置、SSE 监听和部分运行时缓存重启后最稳。
+保存配置后观察日志；连接器会自动刷新连接配置与 SSE 监听。
 
 ### Docker 内访问宿主机失败
 

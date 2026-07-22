@@ -26,25 +26,47 @@ export class HapiClient {
   constructor(config) {
     this.proxyAgent = null
     this.proxyAgentUrl = ''
-    this.configure(config)
     this.jwt = ''
     this.obtainedAt = 0
     this.authing = null
+    this.authGeneration = 0
+    this.connectionSignature = ''
+    this.configure(config)
   }
 
   configure(config) {
-    this.endpoint = String(config.hapi_endpoint || '').replace(/\/+$/, '')
-    this.accessToken = String(config.access_token || '')
-    this.jwtLifetime = Number(config.jwt_lifetime || 900)
-    this.refreshBefore = Number(config.refresh_before_expiry || 180)
+    const endpoint = String(config.hapi_endpoint || '').replace(/\/+$/, '')
+    const accessToken = String(config.access_token || '')
+    const jwtLifetime = Number(config.jwt_lifetime || 900)
+    const refreshBefore = Number(config.refresh_before_expiry || 180)
     const proxyUrl = String(config.proxy_url || '').trim()
+    const cfClientId = cleanCfValue(config.cf_access_client_id, 'cf-access-client-id:')
+    const cfClientSecret = cleanCfValue(config.cf_access_client_secret, 'cf-access-client-secret:')
+    const signature = JSON.stringify([
+      endpoint, accessToken, proxyUrl, cfClientId, cfClientSecret, jwtLifetime, refreshBefore,
+    ])
+    const changed = Boolean(this.connectionSignature && this.connectionSignature !== signature)
+
     if (this.proxyUrl !== proxyUrl) {
       this.proxyAgent = null
       this.proxyAgentUrl = ''
     }
+    this.endpoint = endpoint
+    this.accessToken = accessToken
+    this.jwtLifetime = jwtLifetime
+    this.refreshBefore = refreshBefore
     this.proxyUrl = proxyUrl
-    this.cfClientId = cleanCfValue(config.cf_access_client_id, 'cf-access-client-id:')
-    this.cfClientSecret = cleanCfValue(config.cf_access_client_secret, 'cf-access-client-secret:')
+    this.cfClientId = cfClientId
+    this.cfClientSecret = cfClientSecret
+    this.connectionSignature = signature
+
+    if (changed) {
+      this.authGeneration += 1
+      this.jwt = ''
+      this.obtainedAt = 0
+      this.authing = null
+    }
+    return changed
   }
 
   isConfigured() {
@@ -80,14 +102,16 @@ export class HapiClient {
   async getToken(force = false) {
     if (!force && !this.shouldRefresh()) return this.jwt
     if (!this.authing) {
-      this.authing = this.auth().finally(() => {
-        this.authing = null
+      const generation = this.authGeneration
+      const authing = this.auth(generation).finally(() => {
+        if (this.authing === authing) this.authing = null
       })
+      this.authing = authing
     }
     return this.authing
   }
 
-  async auth() {
+  async auth(generation = this.authGeneration) {
     const fetch = await getFetch(this.proxyUrl)
     const proxyOptions = await this.proxyOptions()
     const res = await fetch(`${this.endpoint}/api/auth`, {
@@ -101,9 +125,11 @@ export class HapiClient {
       throw new Error(`获取 JWT 失败: ${res.status} ${body.slice(0, 200)}`)
     }
     const data = await res.json()
-    this.jwt = data.token
-    this.obtainedAt = Date.now()
-    return this.jwt
+    if (generation === this.authGeneration) {
+      this.jwt = data.token
+      this.obtainedAt = Date.now()
+    }
+    return data.token
   }
 
   async request(method, route, { json, params, auth = true, retry = true } = {}) {

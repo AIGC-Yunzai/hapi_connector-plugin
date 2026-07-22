@@ -1,19 +1,24 @@
 import { formatHapiMessageNodes } from './hapiMessages.js'
+import { getFlavorDisplay } from './flavorProfiles.js'
 
-export const PERMISSION_MODES = {
-  claude: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
-  codex: ['default', 'read-only', 'safe-yolo', 'yolo'],
-  gemini: ['default', 'read-only', 'safe-yolo', 'yolo'],
-  grok: ['default', 'auto', 'plan', 'bypassPermissions'],
-  opencode: ['default', 'plan', 'yolo'],
+export function getSessionTitle(session) {
+  const meta = session?.metadata || {}
+  for (const value of [session?.thread_name, meta.thread_name, meta.name, session?.name, session?.title, meta.title]) {
+    const title = cleanTitle(value)
+    if (title) return title
+  }
+  for (const summary of [session?.summary, meta.summary]) {
+    const summaryTitle = cleanTitle(summary)
+    if (summaryTitle) return summaryTitle
+  }
+  return '(无标题)'
 }
 
-export const MODEL_MODES = ['default', 'sonnet', 'sonnet[1m]', 'opus', 'opus[1m]', 'fable', 'fable[1m]']
-export const GEMINI_MODEL_MODES = ['default', 'flash', 'pro']
-export const CLAUDE_EFFORTS = ['', 'medium', 'high', 'max']
-export const CODEX_EFFORTS = ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh']
-export const GROK_EFFORTS = ['', 'low', 'medium', 'high', 'xhigh']
-export const OPENCODE_EFFORTS = ['default', 'low', 'medium', 'high', 'max']
+function cleanTitle(value) {
+  if (value && typeof value === 'object') value = value.text ?? value.name ?? value.title ?? value.summary
+  if (value === undefined || value === null) return ''
+  return String(value).trim()
+}
 
 export function extractTextPreview(content, maxLen = 0) {
   const limit = maxLen > 0 ? maxLen : 999999
@@ -61,9 +66,9 @@ export function sessionLabel(sessionOrSid, sessions = []) {
   const sid = typeof sessionOrSid === 'string' ? sessionOrSid : sessionOrSid?.id
   if (!session) return `会话 ${String(sid || '').slice(0, 8)}`
   const meta = session.metadata || {}
-  const title = meta.summary?.text || meta.name || '(无标题)'
+  const title = getSessionTitle(session)
   const path = meta.path || '(无路径)'
-  const flavor = meta.flavor || '?'
+  const flavor = getFlavorDisplay(meta.flavor)
   return `${title}\n路径: ${path}\n${flavor} | ${session.id.slice(0, 8)}`
 }
 
@@ -127,7 +132,7 @@ function isPlanSession(session) {
 export function formatSessionList(sessions, currentSid = '', allSessions = null, options = {}) {
   if (!sessions.length) return '没有任何 session'
   const indexBySid = new Map()
-  ;(allSessions || sessions).forEach((item, idx) => indexBySid.set(item.id, idx + 1))
+    ; (allSessions || sessions).forEach((item, idx) => indexBySid.set(item.id, idx + 1))
   const routeLabel = typeof options.routeLabel === 'function' ? options.routeLabel : null
 
   const lines = [`共 ${sessions.length} 个 Session:`]
@@ -141,12 +146,12 @@ export function formatSessionList(sessions, currentSid = '', allSessions = null,
       lastPath = path
     }
     const idx = indexBySid.get(session.id)
-    const title = meta.summary?.text || meta.name || '(无标题)'
+    const title = getSessionTitle(session)
     const status = session.thinking ? '思考中' : session.active ? '运行中' : '已关闭'
     const pending = session.pendingRequestsCount ? ` | ${session.pendingRequestsCount} 待审批` : ''
     const current = currentSid === session.id ? ' | <<当前' : ''
     lines.push(`[${idx} | ${session.id.slice(0, 8)}] ${title}`)
-    lines.push(`${status} | ${meta.flavor || '?'}:${session.modelMode || 'default'}${pending}${current}`)
+    lines.push(`${status} | ${getFlavorDisplay(meta.flavor)}:${session.modelMode || 'default'}${pending}${current}`)
     if (routeLabel) lines.push(`推送: ${routeLabel(session)}`)
   }
   lines.push('', '切换会话：\n #hapi sw <序号或ID前缀>')
@@ -156,7 +161,7 @@ export function formatSessionList(sessions, currentSid = '', allSessions = null,
 export function formatSessionListNodes(sessions, currentSid = '', allSessions = null, options = {}) {
   if (!sessions.length) return ['没有任何 session']
   const indexBySid = new Map()
-  ;(allSessions || sessions).forEach((item, idx) => indexBySid.set(item.id, idx + 1))
+    ; (allSessions || sessions).forEach((item, idx) => indexBySid.set(item.id, idx + 1))
   const routeLabel = typeof options.routeLabel === 'function' ? options.routeLabel : null
 
   const pathCounts = new Map()
@@ -170,14 +175,14 @@ export function formatSessionListNodes(sessions, currentSid = '', allSessions = 
   for (const session of sessions) {
     const meta = session.metadata || {}
     const path = meta.path || '(无路径)'
-    const title = meta.summary?.text || meta.name || '(无标题)'
+    const title = getSessionTitle(session)
     const status = session.thinking ? '思考中' : session.active ? '运行中' : '已关闭'
     const pending = session.pendingRequestsCount ? ` | ${session.pendingRequestsCount} 待审批` : ''
     const current = currentSid === session.id ? ' | <<当前' : ''
     const lines = [
       `目录: ${path} (${pathCounts.get(path) || 1})`,
       `[${indexBySid.get(session.id)} | ${session.id.slice(0, 8)}] ${title}`,
-      `${status} | ${meta.flavor || '?'}:${session.modelMode || 'default'}${pending}${current}`,
+      `${status} | ${getFlavorDisplay(meta.flavor)}:${session.modelMode || 'default'}${pending}${current}`,
     ]
     if (routeLabel) lines.push(`推送: ${routeLabel(session)}`)
     nodes.push(lines.join('\n'))
@@ -203,18 +208,21 @@ export function formatSessionStatus(session) {
   const flavor = String(meta.flavor || '').toLowerCase()
   const lines = [
     `Session:  ${session.id?.slice(0, 8)}...`,
-    `标题:     ${meta.summary?.text || meta.name || '(无标题)'}`,
-    `Flavor:   ${meta.flavor || '?'}`,
+    `标题:     ${getSessionTitle(session)}`,
+    `Flavor:   ${getFlavorDisplay(meta.flavor)}`,
     `Path:     ${meta.path || '?'}`,
     `Active:   ${Boolean(session.active)}`,
     `Thinking: ${Boolean(session.thinking)}`,
     `权限模式: ${session.permissionMode || 'default'}`,
     `模型:     ${firstNonEmpty(session.model, session.modelMode, session.model_mode) || 'default'}`,
   ]
-  if (['claude', 'codex', 'grok', 'opencode'].includes(flavor)) {
+  if (['claude', 'codex', 'grok', 'opencode', 'pi'].includes(flavor)) {
     lines.push(`推理强度: ${formatReasoningEffort(session, flavor)}`)
   }
-  if (meta.flavor === 'codex') lines.push(`协作模式: ${session.collaborationMode || 'default'}`)
+  if (flavor === 'codex') {
+    lines.push(`协作模式: ${session.collaborationMode || 'default'}`)
+    lines.push(`Service Tier: ${firstNonEmpty(session.serviceTier, session.service_tier) || 'standard'}`)
+  }
   return lines.join('\n')
 }
 
@@ -278,8 +286,10 @@ export function formatRequestNodes(sid, req, total, sessions, config = {}) {
     '#hapi a 批准全部普通请求',
     '#hapi deny 拒绝',
   ].join('\n')
-  // 戳一戳提示单独占一个转发节点；仅在配置开启戳一戳审核时展示
-  const pokeNode = config.enable_poke_approve ? '“戳一戳我”批准全部普通请求' : ''
+  // 仅当戳一戳配置为 approve 时展示批准提示。
+  const pokeNode = config.enable_poke_approve && (!config.poke_action || config.poke_action === 'approve')
+    ? '“戳一戳我”批准全部普通请求'
+    : ''
 
   if (question) {
     const questions = parseQuestions(req)
@@ -363,11 +373,11 @@ export function helpNodes(topic = '', config = {}) {
   const quickPrefix = quickSendHelpPrefix(config)
   const quickSendLines = quickPrefix
     ? [
-        `${quickPrefix} 内容                  快捷发到当前 session`,
-        `${quickPrefix}{2} 内容               快捷发到第 2 个 session`,
-        `${quickPrefix} 上传附件3张 [内容]      等待附件后发到当前 session`,
-        `${quickPrefix} {2} 上传附件5份 [内容]  等待附件后发到第 2 个 session`,
-      ]
+      `${quickPrefix} 内容                  快捷发到当前 session`,
+      `${quickPrefix}{2} 内容               快捷发到第 2 个 session`,
+      `${quickPrefix} 上传附件3张 [内容]      等待附件后发到当前 session`,
+      `${quickPrefix} {2} 上传附件5份 [内容]  等待附件后发到第 2 个 session`,
+    ]
     : ['快捷发送已关闭，可在锅巴中开启并设置快捷前缀']
 
   return [
@@ -391,7 +401,7 @@ export function helpNodes(topic = '', config = {}) {
       '#hapi as <序号>         本会话允许单个普通请求',
       '#hapi answer <序号> <答案> 回答 question 请求，不是普通聊天',
       '#hapi deny [序号]       拒绝全部或单个请求',
-      '戳一戳机器人            批准全部普通请求',
+      '戳一戳机器人            执行锅巴中配置的戳一戳动作',
     ].join('\n'),
     [
       'Session 管理',
@@ -424,6 +434,7 @@ export function helpNodes(topic = '', config = {}) {
       '#hapi model [模式]      查看/切换模型，支持 opus[1m]',
       '#hapi effort [值]       查看/切换推理强度',
       '#hapi plan              切换 Plan 模式',
+      '#hapi fast [值]         切换 Fast 模式',
       '#hapi output [级别]     查看/切换推送级别，不带值会等待下一条消息',
       '#hapi bind              设置默认通知窗口',
       '#hapi bind status       查看通知路由',

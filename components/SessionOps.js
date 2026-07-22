@@ -1,4 +1,4 @@
-export async function fetchSessions(client) {
+﻿export async function fetchSessions(client) {
   const data = await client.requestJson('GET', '/api/sessions')
   return data.sessions || []
 }
@@ -22,6 +22,14 @@ export async function fetchCodexModels(client, sid) {
 
 export async function fetchGrokModels(client, sid) {
   return client.requestJson('GET', `/api/sessions/${sid}/grok-models`)
+}
+
+export async function fetchCursorModels(client, sid) {
+  return client.requestJson('GET', `/api/sessions/${sid}/cursor-models`)
+}
+
+export async function fetchPiModels(client, sid) {
+  return client.requestJson('GET', `/api/sessions/${sid}/pi-models`)
 }
 
 export async function fetchGrokReasoningEffortOptions(client, sid) {
@@ -120,6 +128,10 @@ export async function fetchMachineOpencodeModels(client, machineId, cwd) {
 
 export async function fetchMachineGrokModels(client, machineId, cwd) {
   return client.requestJson('GET', `/api/machines/${machineId}/grok-models`, { params: { cwd } })
+}
+
+export async function fetchMachineCursorModels(client, machineId) {
+  return client.requestJson('GET', `/api/machines/${machineId}/cursor-models`)
 }
 
 export async function fetchMessages(client, sid, limit = 10) {
@@ -263,6 +275,12 @@ export async function setCollaborationMode(client, sid, mode) {
   return [false, `切换失败: ${res.status} ${(await res.text()).slice(0, 200)}`]
 }
 
+export async function setServiceTier(client, sid, serviceTier) {
+  const res = await client.post(`/api/sessions/${sid}/service-tier`, { json: { serviceTier } })
+  if (res.ok) return [true, `Codex Service Tier 已切换为: ${serviceTier}`]
+  return [false, `切换失败: ${res.status} ${(await res.text()).slice(0, 200)}`]
+}
+
 export async function switchToRemote(client, sid) {
   const res = await client.post(`/api/sessions/${sid}/switch`, { json: {} })
   if (res.ok) return [true, '已切换到 remote 远程托管模式']
@@ -282,13 +300,43 @@ export async function archiveSession(client, sid) {
 }
 
 export async function resumeSession(client, sid) {
-  const res = await client.post(`/api/sessions/${sid}/resume`, { json: {} })
-  if (res.ok) {
-    const data = await res.json()
-    const resumedSid = data.sessionId || sid
-    return [true, `已恢复 [${resumedSid.slice(0, 8)}]`, resumedSid]
+  const resume = await callResumeEndpoint(client, sid, 'resume')
+  if (resume.ok) return [true, `已通过 resume 恢复 [${resume.sid.slice(0, 8)}]`, resume.sid]
+
+  const reopen = await callResumeEndpoint(client, sid, 'reopen')
+  if (reopen.ok) return [true, `resume 失败，已通过 reopen 恢复 [${reopen.sid.slice(0, 8)}]`, reopen.sid]
+
+  return [false, `恢复失败\nresume: ${resume.error}\nreopen: ${reopen.error}`, null]
+}
+
+async function callResumeEndpoint(client, sid, route) {
+  try {
+    const res = await client.post(`/api/sessions/${sid}/${route}`, { json: {} })
+    const body = await readResponseBody(res)
+    const success = res.ok && (
+      route === 'resume'
+        ? body?.type === 'success' || Boolean(body?.sessionId)
+        : body?.ok === true || body?.resumed === true || Boolean(body?.sessionId)
+    )
+    if (success) return { ok: true, sid: body?.sessionId || sid }
+    const incomplete = res.status === 422 && Array.isArray(body?.missing)
+      ? `；缺失字段: ${body.missing.join(', ')}`
+      : ''
+    return {
+      ok: false,
+      error: `${res.status} ${body?.message || body?.error || body?.type || '非成功响应'}${incomplete}`,
+    }
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) }
   }
-  return [false, `恢复失败: ${res.status} ${(await res.text()).slice(0, 200)}`, null]
+}
+
+async function readResponseBody(res) {
+  try {
+    return await res.json()
+  } catch {
+    try { return { message: (await res.text()).slice(0, 500) } } catch { return {} }
+  }
 }
 
 export async function deleteSession(client, sid) {
@@ -382,6 +430,6 @@ export async function sendMessageWithDelayYolo(client, sid, text, attachments = 
   });
 
   // Chain the queue: next task waits for this one to settle (success or failure)
-  _yoloQueues.set(sid, task.catch(() => {}));
+  _yoloQueues.set(sid, task.catch(() => { }));
   return task;
 }

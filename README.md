@@ -4,7 +4,7 @@
 
 # HAPI Connector for TRSS-Yunzai
 
-_把 Claude Code / Codex / Gemini / OpenCode 会话搬进聊天窗口。_
+_把 Claude Code / Codex / Cursor / Grok / Kimi / OpenCode / Pi 会话搬进聊天窗口。_
 
 <img decoding="async" align=right src="resources/readme/girl.webp" width="35%">
 
@@ -78,7 +78,7 @@ hapi_endpoint: "http://127.0.0.1:3006"
 access_token: "your-token"
 ```
 
-改完连接配置后重启云崽，让 SSE 监听和运行时缓存完整生效。
+连接配置保存后会清理旧 JWT 并自动重启 SSE，无需重启云崽。
 
 ## 必备指令
 
@@ -138,7 +138,7 @@ access_token: "your-token"
 #### `create` 的完整格式：
 
 ```text
-#hapi create <machineId> <目录> <claude|codex|gemini|grok|opencode> [simple|worktree] [模型] [推理强度] [权限模式] [yolo]
+#hapi create <machineId> <目录> <claude|codex|cursor|grok|kimi|opencode|pi> [simple|worktree] [模型] [推理强度] [权限模式] [yolo]
 示例：
 #hapi create my-pc E:/myrepo/project codex simple yolo high
 #hapi create my-pc E:/myrepo/project claude simple opus high bypassPermissions

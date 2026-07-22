@@ -3,7 +3,7 @@
 # HAPI 服务地址，例如 http://127.0.0.1:3006
 hapi_endpoint: ""
 
-# HAPI Access Token，支持 token:namespace 格式；修改后重启生效
+# HAPI Access Token，支持 token:namespace 格式；修改后会清理旧 JWT 并重连
 access_token: ""
 
 # 代理地址，支持 http:// 与 https:// 代理；SOCKS 代理需额外依赖，当前会忽略
@@ -49,6 +49,8 @@ remind_pending: true
 remind_interval: 180
 remind_max_count: 3
 enable_poke_approve: true
+# 戳一戳动作：approve / pending / list / status / stop / output_cycle / none
+poke_action: "approve"
 auto_approve_enabled: false
 auto_approve_start: "23:00"
 auto_approve_end: "07:00"

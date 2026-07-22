@@ -56,18 +56,30 @@ export class SseListener {
     this.connError = ''
     this.hibernated = false
     this.autoRetry = new Map()
+    this.generation = 0
   }
 
   start(config) {
     this.config = config
     if (this.running) return
+    this.generation += 1
     this.running = true
-    this.loop()
+    this.loop(this.generation)
   }
 
   stop() {
+    this.generation += 1
     this.running = false
     this.abortController?.abort()
+    this.abortController = null
+  }
+
+  restart(config) {
+    this.stop()
+    this.hibernated = false
+    this.connFailCount = 0
+    this.connError = ''
+    this.start(config)
   }
 
   wakeUp() {
@@ -99,9 +111,9 @@ export class SseListener {
     if (index > 0) this.freeIndices.add(index)
   }
 
-  async loop() {
+  async loop(generation = this.generation) {
     let backoff = 1000
-    while (this.running) {
+    while (this.running && generation === this.generation) {
       try {
         this.abortController = new AbortController()
         const res = await this.client.subscribeEvents({ signal: this.abortController.signal })
@@ -109,9 +121,9 @@ export class SseListener {
         this.connError = ''
         backoff = 1000
         logger.mark(`[hapi-connector] SSE 连接成功: ${this.config?.hapi_endpoint || ''}`)
-        await this.readStream(res)
+        await this.readStream(res, generation)
       } catch (err) {
-        if (!this.running || err.name === 'AbortError') return
+        if (!this.running || generation !== this.generation || err.name === 'AbortError') return
         this.connFailCount += 1
         this.connError = `${err.name || 'Error'}: ${err.message || err}`
         logger.mark(`[hapi-connector] SSE 连接失败(${this.connFailCount}): ${this.connError}`)
@@ -129,10 +141,10 @@ export class SseListener {
     }
   }
 
-  async readStream(res) {
+  async readStream(res, generation = this.generation) {
     let buf = ''
     for await (const chunk of res.body) {
-      if (!this.running) return
+      if (!this.running || generation !== this.generation) return
       buf += Buffer.from(chunk).toString('utf8')
       let idx = buf.indexOf('\n')
       while (idx >= 0) {
@@ -221,6 +233,7 @@ export class SseListener {
       'supportedModelReasoningEfforts',
       'effort',
       'collaborationMode',
+      'serviceTier',
     ]) {
       if (data[key] !== undefined) session[key] = data[key]
     }
@@ -417,7 +430,7 @@ export class SseListener {
     if (state.count >= max) {
       logger.mark(`[hapi-connector] 自动 continue 重试已达上限 ${max}: ${sid.slice(0, 8)}`)
       if (this.config?.output_level !== 'silence') {
-        this.notify(`自动 continue 重试已达上限 ${max} 次，已停止重试。\n命中报错：${matched}\n${sessionLabel(sid, this.sessions)}`, sid).catch(() => {})
+        this.notify(`自动 continue 重试已达上限 ${max} 次，已停止重试。\n命中报错：${matched}\n${sessionLabel(sid, this.sessions)}`, sid).catch(() => { })
       }
       return
     }
@@ -429,7 +442,7 @@ export class SseListener {
       const prefix = state.resetCountdown
         ? '再次触发 HAPI 报错，重试倒计时已重置'
         : '检测到 HAPI 报错'
-      this.notify(`${prefix}，将在 ${delayMin} 分钟后自动发送 continue 重试 (${attempt}/${max})。\n命中报错：${matched}\n${sessionLabel(sid, this.sessions)}`, sid).catch(() => {})
+      this.notify(`${prefix}，将在 ${delayMin} 分钟后自动发送 continue 重试 (${attempt}/${max})。\n命中报错：${matched}\n${sessionLabel(sid, this.sessions)}`, sid).catch(() => { })
     }
     state.resetCountdown = false
 
