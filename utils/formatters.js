@@ -1,5 +1,6 @@
 import { formatHapiMessageNodes } from './hapiMessages.js'
 import { getFlavorDisplay } from './flavorProfiles.js'
+import { normalizePokeAction } from './pokeActions.js'
 
 export function getSessionTitle(session) {
   const meta = session?.metadata || {}
@@ -401,7 +402,7 @@ export function helpNodes(topic = '', config = {}) {
       '#hapi as <序号>         本会话允许单个普通请求',
       '#hapi answer <序号> <答案> 回答 question 请求，不是普通聊天',
       '#hapi deny [序号]       拒绝全部或单个请求',
-      '戳一戳机器人            执行锅巴中配置的戳一戳动作',
+      `戳一戳机器人            ${pokeActionHelp(config)}`,
     ].join('\n'),
     [
       'Session 管理',
@@ -446,6 +447,20 @@ export function helpNodes(topic = '', config = {}) {
     ].join('\n'),
     createExampleNode(),
   ]
+}
+
+function pokeActionHelp(config = {}) {
+  if (config.enable_poke_approve === false) return '戳一戳动作已关闭'
+  const labels = {
+    approve: '批准全部普通请求',
+    pending: '查看待审批',
+    list: '查看会话列表',
+    status: '查看当前状态',
+    stop: '中止当前 session',
+    output_cycle: '循环切换推送级别',
+    none: '仅确认收到戳一戳',
+  }
+  return labels[normalizePokeAction(config.poke_action)]
 }
 
 function quickSendHelpPrefix(config = {}) {
