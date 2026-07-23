@@ -169,7 +169,18 @@ export function supportGuoba() {
               { label: 'detail', value: 'detail' },
             ],
           },
-          bottomHelpMessage: 'silence 不推送 SSE 对话消息；simple 推送完整可见消息但隐藏 ready/Context updated 系统事件；summary 只推送最后 N 条（由 summary_msg_count 控制）且隐藏 ready/Context updated；detail 推送完整可见消息并保留 ready/system-event 等细节',
+          bottomHelpMessage: 'silence 不推送；simple 推送可见消息（可含 thinking）并隐藏 ready/Context updated；summary 只推最后 N 条且不显示 thinking；detail 显示 thinking 并保留系统事件细节',
+        },
+        {
+          field: 'reasoning_max_chars',
+          label: 'Thinking 最大字数',
+          component: 'InputNumber',
+          componentProps: {
+            min: 0,
+            step: 100,
+            placeholder: '0 表示不显示思考',
+          },
+          bottomHelpMessage: 'thinking 最大字符数：0 = 所有级别都不显示思考；>0 时 simple/detail 显示并截断到该长度（summary 始终不显示思考）',
         },
         {
           field: 'markdown_output',

@@ -7,6 +7,9 @@ const VISIBLE_SYSTEM_SUBTYPES = new Set([
   'compact_boundary',
 ])
 
+/** simple/summary 默认隐藏的 session-event 类型（对齐 WebUI 噪音过滤） */
+export const SIMPLE_HIDDEN_EVENT_TYPES = new Set(['ready', 'token-count'])
+
 export function messageRole(content) {
   const record = unwrapRoleWrappedRecord(content)
   return record?.role || '?'
@@ -47,9 +50,17 @@ export function formatClassifiedMessage(item) {
 
 export function classifyHapiMessages(messages, options = {}) {
   const includeUsers = options.includeUsers !== false
-  return (Array.isArray(messages) ? messages : [])
-    .map(item => classifyHapiMessage(item))
+  const maxReasoningChars = Number(options.reasoningMaxChars)
+  const classified = (Array.isArray(messages) ? messages : [])
+    .flatMap(item => {
+      const result = classifyHapiMessage(item)
+      if (!result) return []
+      return Array.isArray(result) ? result : [result]
+    })
     .filter(item => item && (includeUsers || item.kind !== 'user'))
+    .map(item => truncateReasoningText(item, maxReasoningChars))
+  // 与 WebUI 一致：同 callId 的 tool-call 状态更新只保留一条
+  return collapseToolCallMessages(collapseReasoningMessages(classified))
 }
 
 export function formatHapiMessageNodes(messages, options = {}) {
@@ -68,15 +79,119 @@ export function sessionEventRetryText(messages) {
     .join('\n')
 }
 
+/**
+ * 合并同 stream 的 reasoning 增量（WebUI 覆盖式 merge）。
+ * - 有 streamId：同 id 只保留最后一条
+ * - 无 streamId：连续 reasoning 只保留最后一条（避免流式半截刷屏）
+ */
+export function collapseReasoningMessages(items) {
+  const list = Array.isArray(items) ? items : []
+  const out = []
+  const streamIndex = new Map()
+
+  for (const item of list) {
+    if (item?.kind !== 'reasoning') {
+      out.push(item)
+      continue
+    }
+
+    const streamId = String(item.streamId || '').trim()
+    if (streamId) {
+      const existing = streamIndex.get(streamId)
+      if (existing !== undefined) {
+        out[existing] = item
+        continue
+      }
+      streamIndex.set(streamId, out.length)
+      out.push(item)
+      continue
+    }
+
+    const prev = out[out.length - 1]
+    if (prev?.kind === 'reasoning' && !String(prev.streamId || '').trim()) {
+      out[out.length - 1] = item
+      continue
+    }
+    out.push(item)
+  }
+
+  return out
+}
+
+/**
+ * 合并同 callId 的 tool-call 状态更新（对齐 WebUI ensureToolBlock）。
+ * Grok/ACP 对一次 Execute 常写 pending → pending(补全) → in_progress 多条，
+ * 同 callId 只保留最后一条（覆盖式 merge，位置保持首次出现处）。
+ */
+export function collapseToolCallMessages(items) {
+  const list = Array.isArray(items) ? items : []
+  const out = []
+  const callIndex = new Map()
+
+  for (const item of list) {
+    if (item?.kind !== 'tool-call') {
+      out.push(item)
+      continue
+    }
+
+    const callId = String(item.callId || '').trim()
+    if (!callId) {
+      out.push(item)
+      continue
+    }
+
+    const existingPos = callIndex.get(callId)
+    if (existingPos === undefined) {
+      callIndex.set(callId, out.length)
+      out.push(item)
+      continue
+    }
+
+    // 后写覆盖先写（与 WebUI 一致）；若后一条摘要更空则保留先前的正文
+    const prev = out[existingPos]
+    const next = item
+    const prevDetail = toolCallDetail(prev?.text)
+    const nextDetail = toolCallDetail(next?.text)
+    if (nextDetail || !prevDetail) {
+      out[existingPos] = next
+    } else {
+      out[existingPos] = {
+        ...next,
+        text: prev.text,
+        label: next.label || prev.label,
+      }
+    }
+  }
+
+  return out
+}
+
+function toolCallDetail(text) {
+  const raw = String(text || '')
+  const i = raw.indexOf(':')
+  if (i < 0) return ''
+  return raw.slice(i + 1).trim()
+}
+
+/**
+ * 截断 thinking 文本。limit<=0 时不在此丢弃（由输出级别/配置决定是否推送），
+ * 仅对 limit>0 做长度限制。
+ */
+export function truncateReasoningText(item, maxChars) {
+  if (!item || item.kind !== 'reasoning') return item
+  const limit = Number(maxChars)
+  if (!Number.isFinite(limit) || limit <= 0) return item
+  const text = String(item.text || '')
+  if (text.length <= limit) return item
+  return { ...item, text: `${text.slice(0, limit).trimEnd()}…` }
+}
+
 function classifyClaudeOutput(message, data) {
   if (!isObject(data) || typeof data.type !== 'string') return null
   if (data.isMeta || data.isCompactSummary) return null
   if (!isClaudeVisibleMessage(data)) return null
 
-  if (data.type === 'assistant') {
-    const text = extractAssistantOutputText(data)
-    return text ? buildClassified('assistant-reply', message, text) : null
-  }
+  if (data.type === 'assistant') return classifyClaudeAssistant(message, data)
 
   if (data.type === 'system' && data.subtype === 'api_error') {
     const text = withErrorDetail(formatApiError(data), data.error)
@@ -111,6 +226,67 @@ function classifyClaudeOutput(message, data) {
   return null
 }
 
+function classifyClaudeAssistant(message, data) {
+  const body = isObject(data.message) ? data.message : null
+  if (!body) return null
+
+  const content = body.content
+  if (typeof content === 'string') {
+    const text = content.trim()
+    return text ? buildClassified('assistant-reply', message, text) : null
+  }
+
+  if (!Array.isArray(content)) {
+    const text = extractReplyPlainText(content)
+    return text ? buildClassified('assistant-reply', message, text) : null
+  }
+
+  const thinkingParts = []
+  const textParts = []
+  const toolParts = []
+
+  for (const block of content) {
+    if (!isObject(block)) continue
+    const type = String(block.type || '')
+    if (type === 'thinking') {
+      const thinking = firstString(block.thinking, block.text)
+      if (thinking) thinkingParts.push(thinking)
+      continue
+    }
+    if (type === 'text') {
+      const text = firstString(block.text)
+      if (text) textParts.push(text)
+      continue
+    }
+    if (['tool_use', 'tool-call'].includes(type)) {
+      const tool = formatToolCall(block.name, block.input)
+      if (tool) {
+        toolParts.push({
+          text: tool,
+          callId: firstString(block.id, block.tool_use_id, block.toolUseId, block.callId),
+        })
+      }
+    }
+  }
+
+  const items = []
+  if (thinkingParts.length) {
+    items.push(buildClassified('reasoning', message, thinkingParts.join('\n'), {
+      event: { type: 'reasoning' },
+    }))
+  }
+  for (const tool of toolParts) {
+    items.push(buildClassified('tool-call', message, tool.text, {
+      callId: tool.callId || undefined,
+      event: tool.callId ? { type: 'tool-call', callId: tool.callId } : { type: 'tool-call' },
+    }))
+  }
+  if (textParts.length) {
+    items.push(buildClassified('assistant-reply', message, textParts.join('\n')))
+  }
+  return items.length ? items : null
+}
+
 function classifySessionEvent(message, event) {
   if (!isObject(event) || typeof event.type !== 'string') return null
   const kind = event.type === 'api-error'
@@ -143,8 +319,28 @@ function classifyCodexPayload(message, data) {
     return buildClassified('assistant-reply', message, data.message)
   }
 
+  // Grok/Codex/ACP reasoning 流（WebUI 的 thinking 块）
+  if (data.type === 'reasoning' && typeof data.message === 'string') {
+    const streamId = firstString(data.id, data.streamId, data.stream_id)
+    return buildClassified('reasoning', message, data.message, {
+      event: { type: 'reasoning', id: streamId || undefined },
+      streamId,
+    })
+  }
+
   if (data.type === 'tool-call' && typeof data.callId === 'string') {
-    return buildClassified('tool-call', message, formatToolCall(data.name, data.input))
+    const callId = firstString(data.callId, data.id)
+    return buildClassified('tool-call', message, formatToolCall(data.name, data.input), {
+      callId,
+      event: { type: 'tool-call', callId, status: firstString(data.status) || undefined },
+    })
+  }
+
+  if (data.type === 'plan' || data.type === 'plan_update') {
+    const text = formatPlanText(data)
+    return text
+      ? buildClassified('plan', message, text, { event: { type: 'plan' } })
+      : null
   }
 
   if (data.type === 'context_compacted') {
@@ -189,6 +385,8 @@ function buildClassified(kind, message, text, extra = {}) {
 
 function labelForKind(kind) {
   if (kind === 'assistant-reply') return 'assistant'
+  if (kind === 'reasoning') return 'thinking'
+  if (kind === 'plan') return 'plan'
   if (kind === 'session-event') return 'system-event'
   if (kind === 'api-error') return 'api-error'
   if (kind === 'error') return 'error'
@@ -221,10 +419,24 @@ function isClaudeVisibleMessage(data) {
   return VISIBLE_SYSTEM_SUBTYPES.has(data.subtype)
 }
 
-function extractAssistantOutputText(data) {
-  const message = isObject(data.message) ? data.message : null
-  if (!message) return ''
-  return extractPlainText(message.content)
+/** 仅提取正式回复文本，不包含 thinking */
+function extractReplyPlainText(value) {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) return value.map(extractReplyPlainText).filter(Boolean).join('\n')
+  if (!isObject(value)) return value == null ? '' : String(value)
+
+  if (value.message?.role && value.message?.content) return extractReplyPlainText(value.message.content)
+  if (value.role && value.content) return extractReplyPlainText(value.content)
+
+  const type = String(value.type || '')
+  if (type === 'text') return String(value.text || '')
+  if (type === 'thinking' || type === 'reasoning') return ''
+  if (['generated-image', 'generated_image'].includes(type)) return ''
+  if (['tool_result', 'tool-call-result', 'token_count'].includes(type)) return ''
+  if (['tool_use', 'tool-call'].includes(type)) return formatToolCall(value.name, value.input)
+  if (type === 'summary') return String(value.summary || '')
+
+  return ''
 }
 
 function extractPlainText(value) {
@@ -237,7 +449,8 @@ function extractPlainText(value) {
 
   const type = String(value.type || '')
   if (type === 'text') return String(value.text || '')
-  if (type === 'thinking') return ''
+  // thinking 在 classifyClaudeAssistant 单独处理；通用路径仍跳过，避免 user 预览混入
+  if (type === 'thinking' || type === 'reasoning') return ''
   if (['generated-image', 'generated_image'].includes(type)) return ''
   if (['tool_result', 'tool-call-result', 'token_count'].includes(type)) return ''
   if (['tool_use', 'tool-call'].includes(type)) return formatToolCall(value.name, value.input)
@@ -246,18 +459,116 @@ function extractPlainText(value) {
   return ''
 }
 
+function formatPlanText(data) {
+  const entries = normalizePlanEntries(data)
+  if (!entries.length) return ''
+  return entries.map(entry => {
+    const mark = entry.status === 'completed' ? 'x' : entry.status === 'in_progress' ? '~' : ' '
+    return `- [${mark}] ${entry.step}`
+  }).join('\n')
+}
+
+function normalizePlanEntries(data) {
+  const record = isObject(data) ? data : null
+  const raw = Array.isArray(data)
+    ? data
+    : Array.isArray(record?.entries)
+      ? record.entries
+      : Array.isArray(record?.items)
+        ? record.items
+        : Array.isArray(record?.plan)
+          ? record.plan
+          : Array.isArray(record?.steps)
+            ? record.steps
+            : []
+
+  const plan = []
+  for (const entry of raw) {
+    if (typeof entry === 'string') {
+      const step = entry.trim()
+      if (step) plan.push({ step, status: 'pending' })
+      continue
+    }
+    if (!isObject(entry)) continue
+    const step = firstString(entry.step, entry.content, entry.text, entry.title, entry.description)
+    if (!step) continue
+    plan.push({
+      step,
+      status: normalizePlanStatus(entry.status ?? entry.state),
+    })
+  }
+  return plan
+}
+
+function normalizePlanStatus(value) {
+  const raw = typeof value === 'string' ? value.trim().toLowerCase().replace(/[\s-]/g, '_') : ''
+  if (raw === 'completed' || raw === 'complete' || raw === 'done') return 'completed'
+  if (raw === 'in_progress' || raw === 'inprogress' || raw === 'active' || raw === 'running') return 'in_progress'
+  return 'pending'
+}
+
 function formatToolCall(name, input) {
-  const tool = firstString(name) || '?'
+  const rawName = firstString(name) || '?'
+  const tool = normalizeToolDisplayName(rawName)
   const args = isObject(input) ? input : {}
   const command = Array.isArray(args.command)
     ? args.command.filter(item => typeof item === 'string').join(' ')
     : firstString(args.command, args.cmd)
+  // Grok/ACP 常把整段命令塞进 name：Execute `ls -la`；优先用 input.command
   if (command) return `${tool}: ${command}`
 
-  const description = firstString(args.description, args.path, args.file_path, args.query)
-  if (description) return `${tool}: ${description}`
+  const embedded = extractEmbeddedToolCommand(rawName)
+  if (embedded) return `${tool}: ${embedded}`
+
+  // Grok read_file 用 target_file；Claude/Codex 用 path/file_path；grep 优先 pattern
+  const target = firstString(
+    args.description,
+    args.target_file,
+    args.file_path,
+    args.filePath,
+    args.file,
+    args.pattern,
+    args.query,
+    args.path,
+    args.url,
+  )
+  if (target) return `${tool}: ${target}`
 
   return tool
+}
+
+/**
+ * 把 "Execute `cmd`" / "Shell: free -h" / "Bash(cmd)" 收成短工具名，
+ * 便于 markdown 识别并按 bash 高亮。
+ */
+function normalizeToolDisplayName(name) {
+  const text = String(name || '').trim()
+  if (!text) return '?'
+  // Execute `...` / Shell `...`
+  const tick = text.match(/^([A-Za-z][\w.-]{0,40})\s*`/)
+  if (tick) return tick[1]
+  // Shell: free -h / Read: README.md
+  const colon = text.match(/^([A-Za-z][\w.-]{0,40})\s*:\s+/)
+  if (colon) return colon[1]
+  // Bash(ls -la)
+  const paren = text.match(/^([A-Za-z][\w.-]{0,40})\s*\(/)
+  if (paren) return paren[1]
+  // 多行 name：只取首个标识符
+  const first = text.match(/^([A-Za-z][\w.-]{0,40})\b/)
+  return first ? first[1] : text.split(/\s+/)[0] || text
+}
+
+/** 从 Execute `cmd` / Shell: cmd / Bash(cmd) 名称中抽出命令正文 */
+function extractEmbeddedToolCommand(name) {
+  const text = String(name || '').trim()
+  if (!text) return ''
+  const tick = text.match(/^[A-Za-z][\w.-]{0,40}\s*`([\s\S]*?)`\s*$/)
+  if (tick?.[1]?.trim()) return tick[1].trim()
+  const colon = text.match(/^[A-Za-z][\w.-]{0,40}\s*:\s+([\s\S]+)$/)
+  if (colon?.[1]?.trim()) return colon[1].trim()
+  const paren = text.match(/^[A-Za-z][\w.-]{0,40}\s*\(([\s\S]*)\)\s*$/)
+  if (paren?.[1]?.trim()) return paren[1].trim()
+  return ''
 }
 
 function formatApiError(data) {

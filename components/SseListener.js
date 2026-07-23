@@ -14,6 +14,7 @@ import {
   classifyHapiMessages,
   messageRole,
   sessionEventRetryText,
+  SIMPLE_HIDDEN_EVENT_TYPES,
 } from '../utils/hapiMessages.js'
 
 function retryDelayMs(config = {}) {
@@ -298,7 +299,14 @@ export class SseListener {
 
       if (this.config?.output_level === 'silence') return
 
-      const visible = classifyHapiMessages(newMessages, { includeUsers: false })
+      // simple：可见消息 + thinking（reasoning_max_chars>0 时）
+      // summary：不显示 thinking，隐藏 ready/token-count，只取最后 N 条
+      // detail：显示 thinking，保留系统事件细节
+      // reasoning_max_chars=0：所有级别都不显示 thinking
+      const visible = classifyHapiMessages(newMessages, {
+        includeUsers: false,
+        reasoningMaxChars: this.config?.reasoning_max_chars,
+      })
         .filter(item => this.shouldOutputClassifiedMessage(item))
         .map(formatClassifiedMessage)
         .filter(Boolean)
@@ -353,16 +361,31 @@ export class SseListener {
     this.scheduleAutoContinueRetry(sid, matched)
   }
 
-  /** ready / Context updated(token-count) 在 simple/summary 不输出，detail 保留完整事件 */
+  /**
+   * thinking 显示规则：
+   * - summary：不显示
+   * - simple / detail：显示（需 reasoning_max_chars > 0）
+   * - reasoning_max_chars === 0：所有级别都不显示 thinking
+   * simple/summary 另隐藏 ready、token-count；detail 保留系统事件。
+   */
   shouldOutputClassifiedMessage(item) {
-    const outputLevel = this.config?.output_level
-    if (item?.kind !== 'session-event') return true
-    const eventType = item.event?.type
-    if (['simple', 'summary'].includes(outputLevel) && eventType === 'ready') {
-      return false
+    if (!item) return false
+    const outputLevel = this.config?.output_level || 'simple'
+    const maxReasoning = Number(this.config?.reasoning_max_chars)
+    const showThinking = Number.isFinite(maxReasoning) && maxReasoning > 0
+
+    if (item.kind === 'reasoning') {
+      if (outputLevel === 'summary') return false
+      if (!showThinking) return false
+      return outputLevel === 'simple' || outputLevel === 'detail'
     }
-    if (['simple', 'summary'].includes(outputLevel) && eventType === 'token-count') {
-      return false
+
+    if (outputLevel === 'detail') return true
+    if (!['simple', 'summary'].includes(outputLevel)) return true
+
+    if (item.kind === 'session-event') {
+      const eventType = item.event?.type
+      if (SIMPLE_HIDDEN_EVENT_TYPES.has(eventType)) return false
     }
     return true
   }

@@ -18,8 +18,14 @@ jwt_lifetime: 900
 refresh_before_expiry: 180
 
 # SSE 推送级别：silence / simple / summary / detail
+# simple：可见消息（可含 thinking），隐藏 ready、Context updated
+# summary：最后 N 条，不显示 thinking
+# detail：显示 thinking，保留系统事件细节
 output_level: "simple"
 summary_msg_count: 5
+
+# thinking 最大字符数：0 = 不显示思考；>0 时 simple/detail 显示并截断到该长度
+reasoning_max_chars: 2000
 
 # 推送 AI 回复的输出方式：text 仅文字 / image 仅图片 / both 图片+文字
 markdown_output: "text"

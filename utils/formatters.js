@@ -38,13 +38,34 @@ function extractInner(value, limit) {
 
   const type = value.type || ''
   if (type === 'text') return String(value.text || '').slice(0, limit)
+  // 与 WebUI / hapiMessages 对齐：thinking/reasoning 可见
+  if (type === 'thinking') return String(value.thinking || value.text || '').slice(0, limit)
+  if (type === 'reasoning') return String(value.message || value.text || '').slice(0, limit)
   if (['generated-image', 'generated_image'].includes(type)) return ''
-  if (['tool_result', 'tool-call-result', 'token_count', 'thinking'].includes(type)) return ''
+  if (['tool_result', 'tool-call-result', 'token_count'].includes(type)) return ''
   if (['tool_use', 'tool-call'].includes(type)) {
     const name = value.name || '?'
-    const input = value.input || {}
-    const command = typeof input === 'object' ? input.command : ''
-    return command ? `${name}: ${String(command).slice(0, limit)}` : String(name)
+    const input = value.input && typeof value.input === 'object' ? value.input : {}
+    const command = Array.isArray(input.command)
+      ? input.command.filter(item => typeof item === 'string').join(' ')
+      : (typeof input.command === 'string' ? input.command : '')
+    if (command) return `${name}: ${String(command).slice(0, limit)}`
+    for (const key of ['description', 'target_file', 'file_path', 'filePath', 'file', 'pattern', 'query', 'path', 'url']) {
+      if (typeof input[key] === 'string' && input[key].trim()) {
+        return `${name}: ${input[key].slice(0, limit)}`
+      }
+    }
+    return String(name)
+  }
+  if (type === 'plan' || type === 'plan_update') {
+    const plan = value.entries || value.items || value.plan || value.steps
+    if (Array.isArray(plan) && plan.length) {
+      return plan.map(entry => {
+        if (typeof entry === 'string') return `- ${entry}`
+        const step = entry?.step || entry?.content || entry?.text || entry?.title || ''
+        return step ? `- ${step}` : ''
+      }).filter(Boolean).join('\n').slice(0, limit)
+    }
   }
   if (type === 'event') {
     const eventType = value.data?.type

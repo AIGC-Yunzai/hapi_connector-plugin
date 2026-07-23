@@ -211,7 +211,10 @@ Docker、局域网、Tailscale 场景通常需要先设置：
 
 ```yaml
 enable_sse: true
+# simple 可见消息（可含 thinking），隐藏 ready、Context updated；summary 不显示 thinking
 output_level: "simple"
+# 0 = 不显示思考；>0 时 simple/detail 显示并截断到该长度
+reasoning_max_chars: 2000
 quick_send_enabled: true
 quick_prefix: ">"
 quick_group_at_bot_only: false
