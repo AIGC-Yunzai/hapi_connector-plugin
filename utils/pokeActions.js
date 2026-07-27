@@ -8,7 +8,8 @@ export const POKE_ACTIONS = Object.freeze([
   'none',
 ])
 
-export const OUTPUT_LEVELS = Object.freeze(['silence', 'simple', 'summary', 'detail'])
+/** 循环顺序：detail → simple → collapsed → summary → silence */
+export const OUTPUT_LEVELS = Object.freeze(['detail', 'simple', 'collapsed', 'summary', 'silence'])
 
 export function normalizePokeAction(value) {
   const action = String(value || '').trim().toLowerCase()

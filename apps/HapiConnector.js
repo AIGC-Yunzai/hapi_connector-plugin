@@ -37,6 +37,7 @@ import {
   sessionLabel,
   sessionLabelWithRuntime,
 } from '../utils/formatters.js'
+import { OUTPUT_LEVELS } from '../utils/pokeActions.js'
 import {
   CLAUDE_MODEL_MODES,
   CREATABLE_FLAVORS,
@@ -1246,7 +1247,7 @@ export class HapiConnector extends plugin {
   }
 
   async cmdOutput(e, arg) {
-    const levels = ['silence', 'simple', 'summary', 'detail']
+    const levels = [...OUTPUT_LEVELS]
     if (!arg) {
       arg = await this.awaitSettingArg(e, `当前推送级别: ${this.config.output_level}\n可用: ${levels.join(', ')}\n请在 120 秒内发送要切换的推送级别，发送“取消”退出`)
       if (!arg) return true

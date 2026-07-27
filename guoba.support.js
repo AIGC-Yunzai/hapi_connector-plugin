@@ -163,13 +163,14 @@ export function supportGuoba() {
           component: 'Select',
           componentProps: {
             options: [
-              { label: 'silence', value: 'silence' },
-              { label: 'simple', value: 'simple' },
-              { label: 'summary', value: 'summary' },
               { label: 'detail', value: 'detail' },
+              { label: 'simple', value: 'simple' },
+              { label: 'collapsed', value: 'collapsed' },
+              { label: 'summary', value: 'summary' },
+              { label: 'silence', value: 'silence' },
             ],
           },
-          bottomHelpMessage: 'silence 不推送；simple 推送可见消息（可含 thinking）并隐藏 ready/Context updated；summary 只推最后 N 条且不显示 thinking；detail 显示 thinking 并保留系统事件细节',
+          bottomHelpMessage: '循环序 detail→simple→collapsed→summary→silence。detail 显示 thinking 与系统细节；simple 可见消息（可含 thinking）并隐藏 ready/Context updated；collapsed 将 tools 合并为 1 块且仅单行标题、不显示 thinking；summary 只推最后 N 条且不显示 thinking；silence 不推送',
         },
         {
           field: 'reasoning_max_chars',
@@ -180,7 +181,7 @@ export function supportGuoba() {
             step: 100,
             placeholder: '0 表示不显示思考',
           },
-          bottomHelpMessage: 'thinking 最大字符数：0 = 所有级别都不显示思考；>0 时 simple/detail 显示并截断到该长度（summary 始终不显示思考）',
+          bottomHelpMessage: 'thinking 最大字符数：0 = 所有级别都不显示思考；>0 时仅 simple/detail 显示并截断到该长度（collapsed/summary 始终不显示思考）',
         },
         {
           field: 'markdown_output',

@@ -299,13 +299,16 @@ export class SseListener {
 
       if (this.config?.output_level === 'silence') return
 
-      // simple：可见消息 + thinking（reasoning_max_chars>0 时）
-      // summary：不显示 thinking，隐藏 ready/token-count，只取最后 N 条
       // detail：显示 thinking，保留系统事件细节
+      // simple：可见消息 + thinking（reasoning_max_chars>0 时），隐藏 ready/token-count
+      // collapsed：tools 合并为 1 块且仅单行标题，不显示 thinking；隐藏 ready/token-count
+      // summary：不显示 thinking，隐藏 ready/token-count，只取最后 N 条
       // reasoning_max_chars=0：所有级别都不显示 thinking
+      const outputLevel = this.config?.output_level || 'simple'
       const visible = classifyHapiMessages(newMessages, {
         includeUsers: false,
         reasoningMaxChars: this.config?.reasoning_max_chars,
+        collapseActivity: outputLevel === 'collapsed',
       })
         .filter(item => this.shouldOutputClassifiedMessage(item))
         .map(formatClassifiedMessage)
@@ -314,7 +317,7 @@ export class SseListener {
       const generatedImages = collectGeneratedImagesFromMessages(newMessages)
 
       const count = Number(this.config?.summary_msg_count || 5)
-      const picked = this.config?.output_level === 'summary' ? visible.slice(-count) : visible
+      const picked = outputLevel === 'summary' ? visible.slice(-count) : visible
       if (picked.length) {
         const header = await this.buildSessionHeader(sid)
         const payload = [header, ...picked]
@@ -363,10 +366,10 @@ export class SseListener {
 
   /**
    * thinking 显示规则：
-   * - summary：不显示
+   * - collapsed / summary：不显示
    * - simple / detail：显示（需 reasoning_max_chars > 0）
    * - reasoning_max_chars === 0：所有级别都不显示 thinking
-   * simple/summary 另隐藏 ready、token-count；detail 保留系统事件。
+   * simple/collapsed/summary 另隐藏 ready、token-count；detail 保留系统事件。
    */
   shouldOutputClassifiedMessage(item) {
     if (!item) return false
@@ -375,13 +378,13 @@ export class SseListener {
     const showThinking = Number.isFinite(maxReasoning) && maxReasoning > 0
 
     if (item.kind === 'reasoning') {
-      if (outputLevel === 'summary') return false
+      if (outputLevel === 'summary' || outputLevel === 'collapsed') return false
       if (!showThinking) return false
       return outputLevel === 'simple' || outputLevel === 'detail'
     }
 
     if (outputLevel === 'detail') return true
-    if (!['simple', 'summary'].includes(outputLevel)) return true
+    if (!['simple', 'collapsed', 'summary'].includes(outputLevel)) return true
 
     if (item.kind === 'session-event') {
       const eventType = item.event?.type

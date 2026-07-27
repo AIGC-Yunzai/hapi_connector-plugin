@@ -33,6 +33,8 @@ function fenceLanguage(title, body) {
   const head = String(title || '').trim().toLowerCase()
   const text = String(body || '').trim()
   if (hasFencedCode(text)) return null
+  // activity 块是多行 tool 标题列表，保持纯文本，不做 code fence
+  if (head === 'activity' || head.startsWith('activity ')) return ''
   const toolName = extractToolName(text)
   if (toolName && isShellToolName(toolName)) return 'bash'
   if (head.startsWith('system-event')) return ''
@@ -41,6 +43,10 @@ function fenceLanguage(title, body) {
 }
 
 function toolBodyToMarkdown(title, body) {
+  if (isActivityTitle(title)) {
+    // collapsed 级别：块内已是单行标题，原样输出
+    return String(body || '').trim() || null
+  }
   if (!isToolTitle(title)) return null
   const parsed = parseToolBody(body)
   if (!parsed) return String(body || '').trim()
@@ -55,6 +61,11 @@ function toolBodyToMarkdown(title, body) {
 function isToolTitle(title) {
   const head = String(title || '').trim().toLowerCase()
   return head === 'tool' || head.startsWith('tool ')
+}
+
+function isActivityTitle(title) {
+  const head = String(title || '').trim().toLowerCase()
+  return head === 'activity' || head.startsWith('activity ')
 }
 
 function parseToolBody(body) {

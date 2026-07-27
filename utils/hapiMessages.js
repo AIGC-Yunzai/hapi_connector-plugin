@@ -7,7 +7,7 @@ const VISIBLE_SYSTEM_SUBTYPES = new Set([
   'compact_boundary',
 ])
 
-/** simple/summary 默认隐藏的 session-event 类型（对齐 WebUI 噪音过滤） */
+/** simple/collapsed/summary 默认隐藏的 session-event 类型（对齐 WebUI 噪音过滤） */
 export const SIMPLE_HIDDEN_EVENT_TYPES = new Set(['ready', 'token-count'])
 
 export function messageRole(content) {
@@ -44,6 +44,8 @@ export function classifyHapiMessage(message) {
 
 export function formatClassifiedMessage(item) {
   if (!item?.text) return ''
+  // activity 块本身是摘要列表，不再附带 #seq，避免与块内多行标题抢视觉
+  if (item.kind === 'activity') return `${item.label}\n${item.text}`
   const seq = item.seq ? ` #${item.seq}` : ''
   return `${item.label}${seq}\n${item.text}`
 }
@@ -51,6 +53,7 @@ export function formatClassifiedMessage(item) {
 export function classifyHapiMessages(messages, options = {}) {
   const includeUsers = options.includeUsers !== false
   const maxReasoningChars = Number(options.reasoningMaxChars)
+  const collapseActivity = Boolean(options.collapseActivity)
   const classified = (Array.isArray(messages) ? messages : [])
     .flatMap(item => {
       const result = classifyHapiMessage(item)
@@ -60,7 +63,9 @@ export function classifyHapiMessages(messages, options = {}) {
     .filter(item => item && (includeUsers || item.kind !== 'user'))
     .map(item => truncateReasoningText(item, maxReasoningChars))
   // 与 WebUI 一致：同 callId 的 tool-call 状态更新只保留一条
-  return collapseToolCallMessages(collapseReasoningMessages(classified))
+  const collapsed = collapseToolCallMessages(collapseReasoningMessages(classified))
+  // collapsed 推送级别：连续 tool 合并为 1 个 activity 块，块内仅单行标题
+  return collapseActivity ? collapseActivityBlocks(collapsed) : collapsed
 }
 
 export function formatHapiMessageNodes(messages, options = {}) {
@@ -115,6 +120,63 @@ export function collapseReasoningMessages(items) {
     out.push(item)
   }
 
+  return out
+}
+
+const COLLAPSED_TITLE_MAX = 120
+
+/**
+ * 把 tool 正文压成单行标题（对齐 WebUI minimal tool card 只露 title）。
+ */
+export function formatCollapsedToolTitle(text, maxLen = COLLAPSED_TITLE_MAX) {
+  const line = String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!line) return ''
+  const limit = Number(maxLen)
+  if (!Number.isFinite(limit) || limit <= 0 || line.length <= limit) return line
+  return `${line.slice(0, Math.max(1, limit - 1)).trimEnd()}…`
+}
+
+/**
+ * 连续 tool-call 合并为 1 个 activity 块（对齐 WebUI tool-group 折叠态）。
+ * 块内每条 tool 仅保留单行标题；reasoning 不并入（collapsed/summary 直接不显示 thinking）。
+ */
+export function collapseActivityBlocks(items) {
+  const list = Array.isArray(items) ? items : []
+  const out = []
+  let toolBuf = []
+
+  const flushTools = () => {
+    if (!toolBuf.length) return
+    const titles = toolBuf
+      .map(item => formatCollapsedToolTitle(item.text))
+      .filter(Boolean)
+    if (!titles.length) {
+      toolBuf = []
+      return
+    }
+    const last = toolBuf[toolBuf.length - 1]
+    out.push({
+      kind: 'activity',
+      label: 'activity',
+      seq: Number(last?.seq) || 0,
+      text: titles.join('\n'),
+      tools: toolBuf.slice(),
+      event: { type: 'activity', count: titles.length },
+    })
+    toolBuf = []
+  }
+
+  for (const item of list) {
+    if (item?.kind === 'tool-call') {
+      toolBuf.push(item)
+      continue
+    }
+    flushTools()
+    out.push(item)
+  }
+  flushTools()
   return out
 }
 
@@ -392,6 +454,7 @@ function labelForKind(kind) {
   if (kind === 'error') return 'error'
   if (kind === 'summary') return 'summary'
   if (kind === 'tool-call') return 'tool'
+  if (kind === 'activity') return 'activity'
   if (kind === 'user') return 'user'
   return kind
 }
