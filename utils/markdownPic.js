@@ -50,12 +50,11 @@ function toolBodyToMarkdown(title, body) {
   if (!isToolTitle(title)) return null
   const parsed = parseToolBody(body)
   if (!parsed) return String(body || '').trim()
-  if (!parsed.detail || hasFencedCode(parsed.detail)) {
-    return `${parsed.name}${parsed.detail ? `:\n${parsed.detail}` : ''}`.trim()
-  }
-  const language = toolCodeLanguage(parsed.name, parsed.detail)
-  const content = language ? fencedCode(parsed.detail, language) : parsed.detail
-  return `${parsed.name}:\n${content}`
+  // 所有工具调用统一用代码块渲染：工具名+冒号在块外，块内只放执行代码，语言固定为 bash
+  const name = parsed.name || 'tool'
+  const detail = String(parsed.detail || '').trim()
+  if (!detail) return `${name}:`
+  return `${name}:\n\n${fencedCode(detail, 'bash')}`
 }
 
 function isToolTitle(title) {
@@ -98,14 +97,6 @@ function isShellToolName(toolName) {
   // 兼容 name 里仍带着 "Execute `...`" 的旧格式
   return /^(bash|shell|execute|exec|command|cmd|terminal)\b/.test(name)
     || /bash|shell|execute|run_terminal|run_shell|codexbash/i.test(name)
-}
-
-function toolCodeLanguage(toolName, detail) {
-  const name = String(toolName || '')
-  const text = String(detail || '').trim()
-  if (isShellToolName(name)) return 'bash'
-  if (/^(?:\/bin\/(?:ba)?sh\b|(?:ba)?sh\b|zsh\b|fish\b|git\b|node\b|npm\b|pnpm\b|yarn\b|python(?:3)?\b|npx\b|deno\b|bun\b|docker\b|kubectl\b|sed\b|awk\b|grep\b|rg\b|find\b|cat\b|ls\b|cd\b|mkdir\b|rm\b|cp\b|mv\b)/.test(text)) return 'bash'
-  return ''
 }
 
 function hasFencedCode(text) {
