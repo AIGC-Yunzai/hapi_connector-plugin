@@ -234,8 +234,6 @@ export class HapiConnector extends plugin {
           return this.cmdOutput(e, arg)
         case 'bind':
           return this.cmdBind(e, arg)
-        case 'routes':
-          return this.cmdRoutes(e)
         case 'files':
         case 'file':
           return this.cmdFiles(e, arg || '.')
@@ -1291,11 +1289,11 @@ export class HapiConnector extends plugin {
       State.cleanFlavorBinding(e, cleanTarget)
       return this.reply(`已清除当前用户的 ${cleanTarget} 默认通知窗口配置`)
     }
-    if (action === 'status') return this.cmdRoutes(e)
+    if (action === 'status') return this.cmdBindStatus(e)
     return this.reply(`用法：#hapi bind <${flavorHint}|all|status|reset> / #hapi bind clean <all|${flavorHint}>`)
   }
 
-  async cmdRoutes(e) {
+  async cmdBindStatus(e) {
     await this.refreshSessions()
     const lines = ['HAPI 通知路由:']
     for (const session of sessionsCache) {
@@ -2025,8 +2023,11 @@ function parseCreateOptions(agent, tokens = []) {
       }
     }
 
+    // auto / default / inherit 作为推理强度等于“不设置”，而 auto 同时是 claude/grok
+    // 的权限模式，此时不能被推理强度分支吞掉，交给下面的权限模式分支处理
     const effort = ['inherit', 'auto', 'default'].includes(lower) ? '' : lower
-    if (efforts.includes(effort) || (lower === 'default' && efforts.includes('default'))) {
+    const isPermissionAuto = lower === 'auto' && permissionModes.includes('auto')
+    if (!isPermissionAuto && (efforts.includes(effort) || (lower === 'default' && efforts.includes('default')))) {
       options.effort = effort
       continue
     }

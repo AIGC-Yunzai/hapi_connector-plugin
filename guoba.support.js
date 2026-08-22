@@ -64,8 +64,7 @@ export function supportGuoba() {
     helpItem('fast', '切换 Codex Fast 模式', '#hapi fast [on|off|fast|standard]', '仅支持远程 Codex session'),
     helpItem('output', '查看 / 切换 SSE 推送级别', '#hapi output [级别]'),
     helpItem('bind1', '默认通知窗口', '#hapi bind [claude|codex|cursor|grok|kimi|opencode|pi|all]', '设置指定 flavor 或全部默认通知窗口'),
-    helpItem('bind2', '默认通知窗口', '#hapi bind status  /  reset  /  clean <all|flavor>', '查看 / 清除默认通知窗口'),
-    helpItem('routes', '查看 session 推送路由', '#hapi routes'),
+    helpItem('bind2', '默认通知窗口', '#hapi bind status  /  reset  /  clean <all|flavor>', '查看 session 推送路由 / 清除默认通知窗口'),
   ]
 
   return {
@@ -296,7 +295,7 @@ export function supportGuoba() {
           field: 'delay_yolo_mode',
           label: '延迟YOLO模式',
           component: 'Switch',
-          bottomHelpMessage: '开启后，消息发送时若当前为 YOLO/bypassPermissions，先切 default 发送，3秒后自动恢复 YOLO/bypassPermissions 模式，用于某些站点无法直接开启 YOLO/bypassPermissions',
+          bottomHelpMessage: '开启后，消息发送时若当前为自动放行类权限模式（bypassPermissions / yolo / safe-yolo / auto / acceptEdits / autoReview / always-proceed），先切 default 发送，3秒后自动恢复原模式，用于某些站点无法直接开启这些模式',
         },
         {
           field: 'retry_error_strings',

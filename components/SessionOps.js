@@ -385,13 +385,25 @@ export async function readFile(client, sid, path) {
   return [true, data.content || '']
 }
 
-const YOLO_MODES = ['bypassPermissions', 'yolo'];
+// 需要延迟恢复的自动放行 / 半自动放行模式：
+// claude 的 bypassPermissions / auto / acceptEdits，grok 的 bypassPermissions / auto，
+// codex/cursor/opencode/kimi/copilot 的 yolo / safe-yolo，cursor 的 autoReview，agy 的 always-proceed
+const DELAYED_MODES = [
+  'bypassPermissions',
+  'yolo',
+  'auto',
+  'safe-yolo',
+  'acceptEdits',
+  'autoReview',
+  'always-proceed',
+];
 const _yoloQueues = new Map();
 
 /**
  * Send message with delayed YOLO mode workaround.
- * If delay_yolo_mode is enabled and current permissionMode is bypassPermissions/yolo,
- * temporarily switch to default before sending, then restore after 3 seconds.
+ * If delay_yolo_mode is enabled and current permissionMode is one of DELAYED_MODES,
+ * temporarily switch to default before sending, then restore the ORIGINAL mode
+ * after 3 seconds.
  * Uses per-session queue to serialize operations within the same session.
  */
 export async function sendMessageWithDelayYolo(client, sid, text, attachments = [], options = {}) {
@@ -412,7 +424,7 @@ export async function sendMessageWithDelayYolo(client, sid, text, attachments = 
       return sendMessage(client, sid, text, attachments);
     }
 
-    const isYolo = YOLO_MODES.includes(currentMode);
+    const isYolo = DELAYED_MODES.includes(currentMode);
 
     if (isYolo) {
       const [ok] = await setPermissionMode(client, sid, 'default');

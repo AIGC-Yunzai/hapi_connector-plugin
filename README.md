@@ -181,10 +181,9 @@ access_token: "your-token"
 #hapi plan                切换 Plan 模式
 #hapi output [级别]       查看/切换 SSE 推送级别
 #hapi bind                设置当前聊天为默认通知窗口
-#hapi bind status         查看路由
+#hapi bind status         查看 session 推送路由
 #hapi bind reset          清除当前窗口绑定
 #hapi bind clean          清除默认通知窗口
-#hapi routes              查看 session 推送路由
 ```
 
 ### 插件维护

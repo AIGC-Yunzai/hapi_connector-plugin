@@ -69,6 +69,9 @@ max_reconnect_attempts: 30
 enable_sse: true
 
 # 小功能
+# 延迟 YOLO 模式：发送消息时若当前权限模式属于自动放行类
+# （bypassPermissions / yolo / safe-yolo / auto / acceptEdits / autoReview / always-proceed），
+# 先切到 default 发送，3 秒后自动恢复原模式
 delay_yolo_mode: false
 
 # 命中 HAPI system-event 文本后，等待 1 分钟自动发送 continue 重试（大小写敏感）

@@ -462,7 +462,6 @@ export function helpNodes(topic = '', config = {}) {
       '#hapi bind status       查看通知路由',
       '#hapi bind reset        清除当前窗口绑定',
       '#hapi bind clean        清除默认通知窗口',
-      '#hapi routes            查看通知路由',
       '#hapi更新              更新插件',
       '#hapi强制更新          强制更新插件',
     ].join('\n'),
