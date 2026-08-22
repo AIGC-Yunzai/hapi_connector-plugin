@@ -301,7 +301,7 @@ export function supportGuoba() {
         {
           field: 'retry_error_strings',
           label: '系统事件重试字符串',
-          bottomHelpMessage: '仅匹配 HAPI 系统事件 system-event/message 文本，命中后自动发送 continue 重试，大小写敏感',
+          bottomHelpMessage: '匹配 HAPI 系统事件 system-event/message 文本，以及 Claude <synthetic> 合成正文（如 API Error: Request rejected (429)），命中后自动发送 continue 重试，大小写敏感；正常 assistant 回复不参与匹配',
           component: "GTags",
           componentProps: {
             placeholder: '请输入系统事件文本片段',

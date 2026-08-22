@@ -78,10 +78,22 @@ export function formatHapiMessageNodes(messages, options = {}) {
 
 export function sessionEventRetryText(messages) {
   return classifyHapiMessages(messages, { includeUsers: false })
-    .filter(item => item.kind === 'session-event' && item.event?.type === 'message')
+    .filter(isRetryMatchCandidate)
     .map(item => item.retryText || item.text)
     .filter(Boolean)
     .join('\n')
+}
+
+/**
+ * 参与 retry_error_strings 匹配的消息，只放行两类：
+ * - session event 的 message（HAPI 转发的进程日志、退出原因）
+ * - Claude 的 <synthetic> 合成正文（API Error: Request rejected (429) 这类报错走 assistant 通道下发）
+ * 正常 assistant 回复不参与，避免正文里提到关键词就误触发重试。
+ */
+function isRetryMatchCandidate(item) {
+  if (!item) return false
+  if (item.kind === 'session-event' && item.event?.type === 'message') return true
+  return item.kind === 'assistant-reply' && item.syntheticError === true
 }
 
 /**
@@ -292,15 +304,19 @@ function classifyClaudeAssistant(message, data) {
   const body = isObject(data.message) ? data.message : null
   if (!body) return null
 
+  // <synthetic> 是 CLI 本地生成的伪回复（API Error / 中断提示等），不是模型输出，
+  // 打标后交给 sessionEventRetryText 参与 retry_error_strings 匹配。
+  const replyExtra = isSyntheticOutput(data, body) ? { syntheticError: true } : {}
+
   const content = body.content
   if (typeof content === 'string') {
     const text = content.trim()
-    return text ? buildClassified('assistant-reply', message, text) : null
+    return text ? buildClassified('assistant-reply', message, text, replyExtra) : null
   }
 
   if (!Array.isArray(content)) {
     const text = extractReplyPlainText(content)
-    return text ? buildClassified('assistant-reply', message, text) : null
+    return text ? buildClassified('assistant-reply', message, text, replyExtra) : null
   }
 
   const thinkingParts = []
@@ -344,9 +360,18 @@ function classifyClaudeAssistant(message, data) {
     }))
   }
   if (textParts.length) {
-    items.push(buildClassified('assistant-reply', message, textParts.join('\n')))
+    items.push(buildClassified('assistant-reply', message, textParts.join('\n'), replyExtra))
   }
   return items.length ? items : null
+}
+
+/**
+ * 判定 Claude output 是否为合成消息。
+ * 落库后只保留 message.model === '<synthetic>'，顶层 error 仅在 SSE 实时流里出现，两个都认。
+ */
+function isSyntheticOutput(data, body) {
+  if (String(body?.model || '') === '<synthetic>') return true
+  return Boolean(data?.error)
 }
 
 function classifySessionEvent(message, event) {
