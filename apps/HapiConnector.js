@@ -25,6 +25,7 @@ import {
   parseUnstagedFiles,
 } from '../utils/gitDiff.js'
 import {
+  countQuestions,
   formatDirectory,
   formatFiles,
   formatMessageNodes,
@@ -34,6 +35,7 @@ import {
   getSessionTitle,
   helpNodes,
   isQuestionRequest,
+  parseAnswerText,
   sessionLabel,
   sessionLabelWithRuntime,
 } from '../utils/formatters.js'
@@ -376,7 +378,20 @@ export class HapiConnector extends plugin {
   replySessionList(e, sessions, current, allSessions = null) {
     return this.reply(formatSessionListNodes(sessions, current, allSessions, {
       routeLabel: session => State.formatRouteForSession(session, e),
+      pendingBySid: this.collectPendingBySid(),
     }))
+  }
+
+  /** 从 SSE 实时待审批请求构建 sid -> [{rid, req}] 映射，供列表展示回答/审批指令 */
+  collectPendingBySid() {
+    const pending = sharedSse?.getAllPending?.() || {}
+    const map = {}
+    for (const [sid, reqs] of Object.entries(pending)) {
+      const items = []
+      for (const [rid, req] of Object.entries(reqs)) items.push({ rid, req })
+      if (items.length) map[sid] = items
+    }
+    return map
   }
 
   async cmdSwitch(e, target) {
@@ -573,8 +588,10 @@ export class HapiConnector extends plugin {
     if (!item) return this.reply('未找到待回答请求')
     const answer = parts.slice(1).join(' ')
     if (!answer) return this.reply('用法：\n #hapi answer <序号> <答案或选项>')
-    const answers = { 0: [answer] }
-    const [, msg] = await ops.approvePermission(this.client, item.sid, item.rid, answers)
+    const questionCount = countQuestions(item.req)
+    const parsed = parseAnswerText(answer, questionCount)
+    if (parsed.error) return this.reply(`答案数量（${answer.split('/').filter(s => s.trim()).length}）超过问题数（${questionCount} 问）\n多问题请按顺序用 / 分隔，如：#hapi answer ${item.req.index} 答案1 / 答案2`)
+    const [, msg] = await ops.approvePermission(this.client, item.sid, item.rid, parsed)
     return this.reply(msg)
   }
 

@@ -556,6 +556,22 @@ function formatPlanText(data) {
   }).join('\n')
 }
 
+/**
+ * 把 plan 分类项组装成独立的 Plan markdown 文档（供 markdown 图片渲染）。
+ * 每个 plan 项文本已是 `- [ ] 步骤` 形式，直接拼装为 `# Plan` 文档。
+ * @param {Array|Object} items plan 分类项（kind === 'plan'）
+ * @returns {string} markdown 文本；无内容时返回空串
+ */
+export function formatPlanMarkdown(items) {
+  const blocks = (Array.isArray(items) ? items : [items]).filter(Boolean)
+  const body = blocks
+    .map(item => String(item?.text || '').trim())
+    .filter(Boolean)
+    .join('\n\n')
+  if (!body) return ''
+  return `# Plan\n\n${body}`
+}
+
 function normalizePlanEntries(data) {
   const record = isObject(data) ? data : null
   const raw = Array.isArray(data)

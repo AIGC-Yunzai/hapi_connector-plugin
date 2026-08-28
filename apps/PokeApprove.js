@@ -52,8 +52,16 @@ export class hapiPokeApprove extends plugin {
       const fresh = await ops.fetchSessions(client)
       sessions.splice(0, sessions.length, ...fresh)
       const visible = State.visibleSessions(e, sessions).filter(session => session.active || session.thinking)
+      const pending = sse?.getAllPending?.() || {}
+      const pendingBySid = {}
+      for (const [sid, reqs] of Object.entries(pending)) {
+        const items = []
+        for (const [rid, req] of Object.entries(reqs)) items.push({ rid, req })
+        if (items.length) pendingBySid[sid] = items
+      }
       await smartReply(e, formatSessionListNodes(visible, State.currentSid(e), sessions, {
         routeLabel: session => State.formatRouteForSession(session, e),
+        pendingBySid,
       }))
       return true
     }

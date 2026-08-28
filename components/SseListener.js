@@ -12,6 +12,7 @@ import { collectGeneratedImagesFromMessages, imageSegmentFromBuffer } from '../u
 import {
   formatClassifiedMessage,
   classifyHapiMessages,
+  formatPlanMarkdown,
   messageRole,
   sessionEventRetryText,
   SIMPLE_HIDDEN_EVENT_TYPES,
@@ -57,11 +58,14 @@ export class SseListener {
     this.connError = ''
     this.hibernated = false
     this.autoRetry = new Map()
+    this.remindTimer = null
+    this.remindCounts = new Map()
     this.generation = 0
   }
 
   start(config) {
     this.config = config
+    this.startRemindTimer(config)
     if (this.running) return
     this.generation += 1
     this.running = true
@@ -71,6 +75,7 @@ export class SseListener {
   stop() {
     this.generation += 1
     this.running = false
+    this.stopRemindTimer()
     this.abortController?.abort()
     this.abortController = null
   }
@@ -169,6 +174,7 @@ export class SseListener {
     }
     if (evt.type === 'session-ended' || evt.type === 'session-removed') {
       this.resetAutoRetry(evt.sessionId)
+      this.clearPending(evt.sessionId)
       return
     }
     if (evt.type !== 'session-updated') return
@@ -189,8 +195,12 @@ export class SseListener {
       lastSeq: oldSeq,
     }
 
-    if (data.agentState) {
-      await this.handleRequests(sid, data.agentState.requests || {})
+    // HAPI hub 的 session-updated 事件里 agentState 可能是版本化包装
+    // { version, value }（CLI update-state 广播），也可能是原始对象
+    // （refreshSession 全量广播）；统一解包后再取 requests。
+    const agentState = unwrapVersioned(data.agentState)
+    if (agentState && typeof agentState === 'object') {
+      await this.handleRequests(sid, agentState.requests || {})
     }
 
     if (!wasThinking && thinking) {
@@ -236,11 +246,16 @@ export class SseListener {
       'collaborationMode',
       'serviceTier',
     ]) {
-      if (data[key] !== undefined) session[key] = data[key]
+      const value = unwrapVersioned(data[key])
+      if (value !== undefined) session[key] = value
     }
-    if (data.metadata && typeof data.metadata === 'object') {
-      session.metadata = { ...(session.metadata || {}), ...data.metadata }
+    // metadata / agentState 同样可能是版本化包装 { version, value }，先解包再合并
+    const meta = unwrapVersioned(data.metadata)
+    if (meta && typeof meta === 'object') {
+      session.metadata = { ...(session.metadata || {}), ...meta }
     }
+    const agent = unwrapVersioned(data.agentState)
+    if (agent !== undefined) session.agentState = agent
   }
 
   async getLatestSeq(sid) {
@@ -255,7 +270,10 @@ export class SseListener {
   async handleRequests(sid, requests) {
     const oldReqs = this.pending[sid] || {}
     for (const rid of Object.keys(oldReqs)) {
-      if (!requests[rid]) this.freeIndex(oldReqs[rid].index || 0)
+      if (!requests[rid]) {
+        this.freeIndex(oldReqs[rid].index || 0)
+        this.remindCounts.delete(`${sid}:${rid}`)
+      }
     }
 
     const newItems = []
@@ -282,6 +300,11 @@ export class SseListener {
       const total = Object.values(this.pending).reduce((sum, item) => sum + Object.keys(item).length, 0)
       await this.notify(formatRequestNodes(sid, req, total, this.sessions, this.config), sid)
     }
+
+    // Plan proposal 等场景：会话等待审批期间 thinking 一直为 true，
+    // notifyMessages 不会触发，plan 消息会一直停留在历史里不推送。
+    // 这里在出现新请求时主动把尚未推送的 plan md 独立输出。
+    if (newItems.length) await this.notifyPendingPlans(sid)
   }
 
   async notifyMessages(sid, oldSeq) {
@@ -305,22 +328,28 @@ export class SseListener {
       // summary：不显示 thinking，隐藏 ready/token-count，只取最后 N 条
       // reasoning_max_chars=0：所有级别都不显示 thinking
       const outputLevel = this.config?.output_level || 'simple'
-      const visible = classifyHapiMessages(newMessages, {
+      const classified = classifyHapiMessages(newMessages, {
         includeUsers: false,
         reasoningMaxChars: this.config?.reasoning_max_chars,
         collapseActivity: outputLevel === 'collapsed',
       })
         .filter(item => this.shouldOutputClassifiedMessage(item))
-        .map(formatClassifiedMessage)
-        .filter(Boolean)
+
+      // Plan 独立输出：plan / plan_update 消息不混入会话正文，
+      // 单独作为一条合并转发 / 一张 markdown 图片推送。
+      const lastPlanSeq = this.sessionStates[sid]?.lastPlanSeq || 0
+      const planItems = classified.filter(item => item.kind === 'plan' && (item.seq || 0) > lastPlanSeq)
+      const others = classified.filter(item => item.kind !== 'plan')
+      const visible = others.map(formatClassifiedMessage).filter(Boolean)
 
       const generatedImages = collectGeneratedImagesFromMessages(newMessages)
 
       const count = Number(this.config?.summary_msg_count || 5)
-      const picked = outputLevel === 'summary' ? visible.slice(-count) : visible
-      if (picked.length) {
+      const picked = outputLevel === 'summary' ? others.slice(-count) : others
+      const pickedNodes = picked.map(formatClassifiedMessage).filter(Boolean)
+      if (pickedNodes.length) {
         const header = await this.buildSessionHeader(sid)
-        const payload = [header, ...picked]
+        const payload = [header, ...pickedNodes]
         const outs = await buildMarkdownOutputs(
           this.config?.markdown_output,
           payload,
@@ -328,6 +357,10 @@ export class SseListener {
           this.config?.markdown_theme,
         )
         for (const out of outs) await this.notify(out, sid)
+      }
+
+      if (planItems.length) {
+        await this.outputPlanItems(sid, planItems, latestSeq)
       }
 
       // 发送 generated-image 图片（单独发送，不放入 markdown 渲染）
@@ -346,6 +379,115 @@ export class SseListener {
       }
     } catch (err) {
       logger.warn(`[hapi-connector] 拉取会话消息失败: ${err.message || err}`)
+    }
+  }
+
+  /**
+   * 独立输出 plan md：适配 markdown_output 三种模式。
+   * - text：plan 作为独立合并转发节点
+   * - image：plan md 渲染为一张 markdown 图片
+   * - both：节点 + 图片
+   * 输出后记录 lastPlanSeq，避免同一批 plan 消息被重复推送。
+   */
+  async outputPlanItems(sid, planItems, latestSeq = 0) {
+    const planNodes = planItems.map(formatClassifiedMessage).filter(Boolean)
+    if (!planNodes.length) return
+    const markdown = formatPlanMarkdown(planItems)
+    const outs = await buildMarkdownOutputs(
+      this.config?.markdown_output,
+      planNodes,
+      markdown,
+      this.config?.markdown_theme,
+    )
+    for (const out of outs) await this.notify(out, sid)
+    const state = this.sessionStates[sid] || {}
+    const maxPlanSeq = Math.max(
+      Number(state.lastPlanSeq) || 0,
+      Number(latestSeq) || 0,
+      ...planItems.map(item => item.seq || 0),
+    )
+    this.sessionStates[sid] = { ...state, lastPlanSeq: maxPlanSeq }
+  }
+
+  /**
+   * 主动拉取尚未推送的 plan 消息并独立输出。
+   * 用于 Plan proposal 等待审批期间（thinking 一直为 true，notifyMessages 不触发）
+   * 以及新请求出现时，确保 QQ 能及时看到 plan md。
+   */
+  async notifyPendingPlans(sid) {
+    if (this.config?.output_level === 'silence') return
+    try {
+      const messages = await ops.fetchMessages(this.client, sid, 50)
+      if (!messages.length) return
+      const lastPlanSeq = this.sessionStates[sid]?.lastPlanSeq || 0
+      const planItems = classifyHapiMessages(messages, {
+        includeUsers: false,
+        reasoningMaxChars: this.config?.reasoning_max_chars,
+        collapseActivity: this.config?.output_level === 'collapsed',
+      })
+        .filter(item => this.shouldOutputClassifiedMessage(item))
+        .filter(item => item.kind === 'plan' && (item.seq || 0) > lastPlanSeq)
+      if (!planItems.length) return
+      const latestSeq = Math.max(...messages.map(item => item.seq || 0))
+      await this.outputPlanItems(sid, planItems, latestSeq)
+    } catch (err) {
+      logger.warn(`[hapi-connector] 推送 Plan 消息失败: ${err.message || err}`)
+    }
+  }
+
+  clearPending(sid) {
+    if (!sid) return
+    if (this.pending[sid]) {
+      for (const req of Object.values(this.pending[sid])) this.freeIndex(req.index || 0)
+      delete this.pending[sid]
+    }
+    for (const key of [...this.remindCounts.keys()]) {
+      if (key.startsWith(`${sid}:`)) this.remindCounts.delete(key)
+    }
+  }
+
+  startRemindTimer(config) {
+    this.stopRemindTimer()
+    if (config?.remind_pending === false) return
+    const intervalSec = Number(config?.remind_interval ?? 180)
+    const maxCount = Number(config?.remind_max_count ?? 3)
+    if (!Number.isFinite(intervalSec) || intervalSec <= 0) return
+    if (!Number.isFinite(maxCount) || maxCount <= 0) return
+    this.remindTimer = setInterval(() => {
+      this.remindPending().catch(err => logger.warn(`[hapi-connector] 待审批重复提醒失败: ${err?.message || err}`))
+    }, intervalSec * 1000)
+  }
+
+  stopRemindTimer() {
+    if (this.remindTimer) {
+      clearInterval(this.remindTimer)
+      this.remindTimer = null
+    }
+  }
+
+  /** 按 remind_interval 周期重复提醒尚未处理的待审批/提问请求（最多 remind_max_count 次） */
+  async remindPending() {
+    if (!this.running || !this.config) return
+    const pending = this.getAllPending()
+    const items = []
+    for (const [sid, reqs] of Object.entries(pending)) {
+      for (const [rid, req] of Object.entries(reqs)) items.push({ sid, rid, req })
+    }
+    if (!items.length) return
+    const maxCount = Number(this.config.remind_max_count ?? 3)
+    const total = items.length
+    for (const { sid, rid, req } of items) {
+      const key = `${sid}:${rid}`
+      const count = this.remindCounts.get(key) || 0
+      if (count >= maxCount) continue
+      this.remindCounts.set(key, count + 1)
+      try {
+        const nodes = formatRequestNodes(sid, req, total, this.sessions, this.config)
+        nodes[0] = `⏰ 重复提醒 ${count + 1}/${maxCount}（回复后停止）\n${nodes[0]}`
+        await this.notify(nodes, sid)
+      } catch (err) {
+        logger.warn(`[hapi-connector] 待审批提醒发送失败: ${err?.message || err}`)
+      }
     }
   }
 
@@ -532,4 +674,23 @@ export class SseListener {
       return null
     }
   }
+}
+
+/**
+ * HAPI hub 的 session-updated 事件载荷存在两种形态：
+ * - 原始值（refreshSession 全量广播，例如 agentState = { requests, ... }）
+ * - 版本化包装 { version, value }（CLI update-state / update-metadata 等 patch 广播）
+ * 这里统一解包，读取方无需关心载荷形态。
+ */
+function unwrapVersioned(value) {
+  if (
+    value
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && Object.prototype.hasOwnProperty.call(value, 'value')
+    && Object.prototype.hasOwnProperty.call(value, 'version')
+  ) {
+    return value.value
+  }
+  return value
 }
