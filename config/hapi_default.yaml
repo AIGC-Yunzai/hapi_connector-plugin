@@ -77,6 +77,9 @@ delay_yolo_mode: false
 # 命中 HAPI system-event 文本后，等待 1 分钟自动发送 continue 重试（大小写敏感）
 # 匹配范围：session event message（进程日志/退出原因）+ Claude <synthetic> 合成正文
 #（如 API Error: Request rejected (429) · Service Unavailable），不匹配正常 assistant 回复
+# HAPI / Claude 自身也会重试 API 报错，因此：
+# - 报错之后又出现 thinking / 工具调用 / 正常回复，视为已自行恢复，不排重试
+# - 倒计时结束发送前会再确认一次，期间恢复了就取消本次 continue
 retry_error_strings:
   - "API Error: Request rejected"
 retry_max_count: 10

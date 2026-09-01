@@ -76,12 +76,42 @@ export function formatHapiMessageNodes(messages, options = {}) {
   return Array.isArray(messages) && messages.length ? ['(暂无可显示的消息)'] : ['(暂无消息)']
 }
 
-export function sessionEventRetryText(messages) {
-  return classifyHapiMessages(messages, { includeUsers: false })
-    .filter(isRetryMatchCandidate)
-    .map(item => item.retryText || item.text)
+/**
+ * 扫描一批消息，给自动 continue 重试判断提供依据，返回：
+ * - matched：命中的 retry_error_strings 条目（未命中为 ''）
+ * - errorSeq：命中报错所在消息的 seq
+ * - progressSeq：整批消息里最后一条「真实进展」的 seq（没有则为 0）
+ *
+ * progressSeq > errorSeq 说明报错之后 HAPI/Claude 自己重试并恢复了（继续 thinking、
+ * 调工具、给出正常回复），这种情况不该再补发 continue。ready / token-count 这类
+ * 空事件不算进展——它们在报错之后本来就会出现。
+ */
+export function scanRetryMessages(messages, errorStrings = []) {
+  const items = classifyHapiMessages(messages, { includeUsers: false })
+  const patterns = (Array.isArray(errorStrings) ? errorStrings : [])
+    .map(item => String(item || '').trim())
     .filter(Boolean)
-    .join('\n')
+
+  let matched = ''
+  let errorSeq = 0
+  let progressSeq = 0
+
+  for (const item of items) {
+    const seq = Number(item?.seq) || 0
+    if (isRetryProgress(item)) {
+      if (seq > progressSeq) progressSeq = seq
+      continue
+    }
+    if (!isRetryMatchCandidate(item)) continue
+    const text = item.retryText || item.text || ''
+    const hit = patterns.find(pattern => text.includes(pattern))
+    if (hit) {
+      matched = hit
+      errorSeq = seq
+    }
+  }
+
+  return { matched, errorSeq, progressSeq }
 }
 
 /**
@@ -94,6 +124,21 @@ function isRetryMatchCandidate(item) {
   if (!item) return false
   if (item.kind === 'session-event' && item.event?.type === 'message') return true
   return item.kind === 'assistant-reply' && item.syntheticError === true
+}
+
+/** 能证明「会话还在正常往前跑」的消息类型（<synthetic> 报错正文除外） */
+const RETRY_PROGRESS_KINDS = new Set([
+  'assistant-reply',
+  'reasoning',
+  'tool-call',
+  'activity',
+  'plan',
+  'summary',
+])
+
+function isRetryProgress(item) {
+  if (!item || !RETRY_PROGRESS_KINDS.has(item.kind)) return false
+  return !(item.kind === 'assistant-reply' && item.syntheticError === true)
 }
 
 /**
@@ -305,7 +350,7 @@ function classifyClaudeAssistant(message, data) {
   if (!body) return null
 
   // <synthetic> 是 CLI 本地生成的伪回复（API Error / 中断提示等），不是模型输出，
-  // 打标后交给 sessionEventRetryText 参与 retry_error_strings 匹配。
+  // 打标后交给 scanRetryMessages 参与 retry_error_strings 匹配。
   const replyExtra = isSyntheticOutput(data, body) ? { syntheticError: true } : {}
 
   const content = body.content

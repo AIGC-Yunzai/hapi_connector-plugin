@@ -14,7 +14,7 @@ import {
   classifyHapiMessages,
   formatPlanMarkdown,
   messageRole,
-  sessionEventRetryText,
+  scanRetryMessages,
   SIMPLE_HIDDEN_EVENT_TYPES,
 } from '../utils/hapiMessages.js'
 
@@ -491,19 +491,30 @@ export class SseListener {
     }
   }
 
+  /**
+   * HAPI / Claude 自己也会对 API 报错重试，重试成功后会话会继续往下跑。
+   * 所以只有「报错之后再没有任何真实进展」才补发 continue：
+   * - 报错后又出现 thinking / 工具调用 / 正常回复 → 已自行恢复，清空重试状态
+   * - 只出现 ready / token-count 这类空事件 → 仍视为卡住，照常排重试
+   */
   handleAutoContinueRetry(sid, messages) {
     if (!messages.length) return
 
-    const text = sessionEventRetryText(messages)
-    if (!text) return
+    const { matched, errorSeq, progressSeq } = scanRetryMessages(messages, retryErrorStrings(this.config))
 
-    const matched = retryErrorStrings(this.config).find(item => text.includes(item))
     if (!matched) {
+      // 出现过真实进展才清空计数；纯 ready/token-count 事件不动重试状态
+      if (progressSeq > 0) this.resetAutoRetry(sid)
+      return
+    }
+
+    if (progressSeq > errorSeq) {
+      logger.mark(`[hapi-connector] 报错(#${errorSeq})后会话已自行恢复(#${progressSeq})，不再安排自动 continue: ${sid.slice(0, 8)}`)
       this.resetAutoRetry(sid)
       return
     }
 
-    this.scheduleAutoContinueRetry(sid, matched)
+    this.scheduleAutoContinueRetry(sid, matched, errorSeq)
   }
 
   /**
@@ -588,7 +599,7 @@ export class SseListener {
     logger.mark(`[hapi-connector] 会话已开始新一轮思考，取消待发送的自动 continue: ${sid.slice(0, 8)}`)
   }
 
-  scheduleAutoContinueRetry(sid, matched) {
+  scheduleAutoContinueRetry(sid, matched, errorSeq = 0) {
     const max = retryMaxCount(this.config)
     if (max <= 0) return
 
@@ -619,11 +630,45 @@ export class SseListener {
       const latest = this.autoRetry.get(sid)
       if (!latest || latest.timer !== timer) return
       latest.timer = null
-      latest.count += 1
-      this.saveAutoRetryCount(sid, latest.count)
-      this.sendAutoContinue(sid, latest.count, max)
+      this.maybeSendAutoContinue(sid, latest, max, errorSeq)
+        .catch(err => logger.warn(`[hapi-connector] 自动 continue 前置检查失败: ${err?.message || err}`))
     }, retryDelayMs(this.config))
     state.timer = timer
+  }
+
+  /**
+   * 倒计时期间 HAPI 可能已经自己重试成功（SSE 断连时收不到 thinking 事件，
+   * cancelPendingAutoRetry 兜不住），发送前再确认一次会话确实还卡在报错上。
+   */
+  async maybeSendAutoContinue(sid, state, max, errorSeq) {
+    if (!this.running) return
+    if (await this.sessionRecoveredSince(sid, errorSeq)) {
+      logger.mark(`[hapi-connector] 待发送 continue 前发现会话已恢复，取消本次重试: ${sid.slice(0, 8)}`)
+      this.resetAutoRetry(sid)
+      if (this.config?.output_level !== 'silence') {
+        await this.notify(`HAPI 报错后会话已自行恢复，已取消本次自动 continue 重试。\n${sessionLabel(sid, this.sessions)}`, sid).catch(() => { })
+      }
+      return
+    }
+    state.count += 1
+    this.saveAutoRetryCount(sid, state.count)
+    await this.sendAutoContinue(sid, state.count, max)
+  }
+
+  /** 报错之后是否已经出现新的真实进展（或会话正在 thinking） */
+  async sessionRecoveredSince(sid, errorSeq) {
+    if (this.sessionStates[sid]?.thinking) return true
+    if (this.sessions.find(item => item.id === sid)?.thinking) return true
+    if (!errorSeq) return false
+    try {
+      const messages = await ops.fetchMessages(this.client, sid, 20)
+      if (!messages.length) return false
+      const { progressSeq } = scanRetryMessages(messages, retryErrorStrings(this.config))
+      return progressSeq > errorSeq
+    } catch (err) {
+      logger.warn(`[hapi-connector] 校验会话是否已恢复失败: ${err.message || err}`)
+      return false
+    }
   }
 
   async sendAutoContinue(sid, attempt, max) {
