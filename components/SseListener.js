@@ -18,6 +18,14 @@ import {
   SIMPLE_HIDDEN_EVENT_TYPES,
 } from '../utils/hapiMessages.js'
 
+/** hub 每 30s 发一次 heartbeat；超过该时长没收到任何数据，视为连接已假死并重连 */
+const SSE_IDLE_TIMEOUT_MS = 2 * 60 * 1000
+const SSE_IDLE_CHECK_MS = 15 * 1000
+/** 自动 continue 发出后，每隔多久向 hub 核对一次本轮是否已结束 */
+const RETRY_WATCH_INTERVAL_MS = 60 * 1000
+/** 本轮结束后先留给 SSE 自己处理的时间，超过仍未处理才由核对补跑 */
+const RETRY_WATCH_SETTLE_MS = 30 * 1000
+
 function retryDelayMs(config = {}) {
   const minutes = Number(config.retry_delay_minutes ?? 1)
   if (!Number.isFinite(minutes) || minutes <= 0) return 60 * 1000
@@ -147,23 +155,48 @@ export class SseListener {
     }
   }
 
+  /**
+   * 连接可能不报错也不断开，却再也收不到数据（heartbeat 也没有）。
+   * 空闲超过 SSE_IDLE_TIMEOUT_MS 就主动 abort，正常返回后由 loop 重连；
+   * 处理事件（推送、渲染图片）期间不计入空闲时间。
+   */
   async readStream(res, generation = this.generation) {
+    const controller = this.abortController
     let buf = ''
-    for await (const chunk of res.body) {
-      if (!this.running || generation !== this.generation) return
-      buf += Buffer.from(chunk).toString('utf8')
-      let idx = buf.indexOf('\n')
-      while (idx >= 0) {
-        const line = buf.slice(0, idx).replace(/\r$/, '')
-        buf = buf.slice(idx + 1)
-        idx = buf.indexOf('\n')
-        if (!line.startsWith('data: ')) continue
-        try {
-          await this.handle(JSON.parse(line.slice(6)))
-        } catch (err) {
-          logger.warn('[hapi-connector] 忽略无法解析的 SSE 事件', err)
+    let lastDataAt = Date.now()
+    let handling = false
+    let idle = false
+    const watchdog = setInterval(() => {
+      if (handling || idle || Date.now() - lastDataAt < SSE_IDLE_TIMEOUT_MS) return
+      idle = true
+      logger.mark(`[hapi-connector] SSE 已 ${Math.round(SSE_IDLE_TIMEOUT_MS / 1000)} 秒未收到任何数据，主动重连`)
+      controller?.abort()
+    }, SSE_IDLE_CHECK_MS)
+
+    try {
+      for await (const chunk of res.body) {
+        if (!this.running || generation !== this.generation) return
+        handling = true
+        buf += Buffer.from(chunk).toString('utf8')
+        let idx = buf.indexOf('\n')
+        while (idx >= 0) {
+          const line = buf.slice(0, idx).replace(/\r$/, '')
+          buf = buf.slice(idx + 1)
+          idx = buf.indexOf('\n')
+          if (!line.startsWith('data: ')) continue
+          try {
+            await this.handle(JSON.parse(line.slice(6)))
+          } catch (err) {
+            logger.warn('[hapi-connector] 忽略无法解析的 SSE 事件', err)
+          }
         }
+        handling = false
+        lastDataAt = Date.now()
       }
+    } catch (err) {
+      if (!idle) throw err
+    } finally {
+      clearInterval(watchdog)
     }
   }
 
@@ -549,7 +582,7 @@ export class SseListener {
   retryState(sid) {
     let state = this.autoRetry.get(sid)
     if (!state) {
-      state = { count: this.readAutoRetryCount(sid), timer: null, resetCountdown: false }
+      state = { count: this.readAutoRetryCount(sid), timer: null, watchTimer: null, resetCountdown: false }
       this.autoRetry.set(sid, state)
     }
     return state
@@ -586,8 +619,28 @@ export class SseListener {
     if (!sid) return
     const state = this.autoRetry.get(sid)
     if (state?.timer) clearTimeout(state.timer)
+    this.stopAutoContinueWatch(state)
     this.autoRetry.delete(sid)
     this.clearAutoRetryCount(sid)
+  }
+
+  /** 有自动重试状态（倒计时、发送后核对或累计次数）的 session id */
+  autoRetrySids() {
+    return [...this.autoRetry.keys()]
+  }
+
+  /**
+   * #hapi 取消重试：清掉倒计时、发送后核对与累计次数。
+   * 之后会话再次报错会重新从 1 开始计数。没有可取消的状态时返回 null。
+   */
+  cancelAutoRetry(sid) {
+    const state = this.autoRetry.get(sid)
+    const count = state?.count ?? this.readAutoRetryCount(sid)
+    if (!state?.timer && !state?.watchTimer && !count) return null
+    const result = { pending: Boolean(state?.timer), count, max: retryMaxCount(this.config) }
+    this.resetAutoRetry(sid)
+    logger.mark(`[hapi-connector] 已手动取消自动 continue 重试: ${sid.slice(0, 8)}`)
+    return result
   }
 
   cancelPendingAutoRetry(sid) {
@@ -621,9 +674,10 @@ export class SseListener {
       const prefix = state.resetCountdown
         ? '再次触发 HAPI 报错，重试倒计时已重置'
         : '检测到 HAPI 报错'
-      this.notify(`${prefix}，将在 ${delayMin} 分钟后自动发送 continue 重试 (${attempt}/${max})。\n命中报错：${matched}\n${sessionLabel(sid, this.sessions)}`, sid).catch(() => { })
+      this.notify(`${prefix}，将在 ${delayMin} 分钟后自动发送 continue 重试 (${attempt}/${max})。\n命中报错：${matched}\n可用指令：#hapi 取消重试 ${sid.slice(0, 8)}\n${sessionLabel(sid, this.sessions)}`, sid).catch(() => { })
     }
     state.resetCountdown = false
+    this.stopAutoContinueWatch(state)
 
     let timer = null
     timer = setTimeout(() => {
@@ -655,10 +709,18 @@ export class SseListener {
     await this.sendAutoContinue(sid, state.count, max)
   }
 
-  /** 报错之后是否已经出现新的真实进展（或会话正在 thinking） */
+  /**
+   * 报错之后是否已经出现新的真实进展（或会话正在 thinking）。
+   * thinking 以 hub 实时状态为准：SSE 丢事件时本地缓存可能停在旧值。
+   */
   async sessionRecoveredSince(sid, errorSeq) {
-    if (this.sessionStates[sid]?.thinking) return true
-    if (this.sessions.find(item => item.id === sid)?.thinking) return true
+    try {
+      const detail = await ops.fetchSessionDetail(this.client, sid)
+      if (detail?.thinking) return true
+    } catch {
+      if (this.sessionStates[sid]?.thinking) return true
+      if (this.sessions.find(item => item.id === sid)?.thinking) return true
+    }
     if (!errorSeq) return false
     try {
       const messages = await ops.fetchMessages(this.client, sid, 20)
@@ -679,6 +741,7 @@ export class SseListener {
       })
       if (ok) {
         logger.mark(`[hapi-connector] 已自动发送 continue 重试 (${attempt}/${max}): ${sid.slice(0, 8)}`)
+        this.watchAutoContinue(sid)
       } else {
         logger.warn(`[hapi-connector] 自动发送 continue 失败: ${message}`)
         if (this.config?.output_level !== 'silence') await this.notify(`自动发送 continue 失败：${message}`, sid)
@@ -687,6 +750,59 @@ export class SseListener {
       logger.warn(`[hapi-connector] 自动发送 continue 异常: ${err.message || err}`)
       if (this.config?.output_level !== 'silence') await this.notify(`自动发送 continue 异常：${err.message || err}`, sid)
     }
+  }
+
+  /**
+   * SSE 偶发丢事件（连接没断、也没报错），漏掉本轮 thinking true→false 时
+   * notifyMessages 不会触发，自动重试链就此中断。continue 发出后定时直接向 hub
+   * 核对：会话已空闲、且有 SSE 没处理过的 agent 新消息，就主动补跑一次
+   * notifyMessages（补推漏掉的输出，并照常判断是否继续重试）。
+   * 重排重试 / 清空重试状态 / 会话结束时停止核对。
+   */
+  watchAutoContinue(sid) {
+    const state = this.autoRetry.get(sid)
+    if (!state) return
+    this.stopAutoContinueWatch(state)
+    const watchTimer = setTimeout(() => {
+      if (state.watchTimer !== watchTimer) return
+      state.watchTimer = null
+      this.checkAutoContinueOutcome(sid, state).catch(err => {
+        logger.warn(`[hapi-connector] 核对自动 continue 结果失败: ${err?.message || err}`)
+        if (this.autoRetry.get(sid) === state && !state.timer) this.watchAutoContinue(sid)
+      })
+    }, RETRY_WATCH_INTERVAL_MS)
+    state.watchTimer = watchTimer
+  }
+
+  stopAutoContinueWatch(state) {
+    if (!state?.watchTimer) return
+    clearTimeout(state.watchTimer)
+    state.watchTimer = null
+  }
+
+  async checkAutoContinueOutcome(sid, state) {
+    const stale = () => !this.running || this.autoRetry.get(sid) !== state || Boolean(state.timer)
+    if (stale()) return
+
+    const detail = await ops.fetchSessionDetail(this.client, sid)
+    if (stale() || detail?.active === false) return
+    if (detail?.thinking) return this.watchAutoContinue(sid)
+
+    const lastSeq = this.sessionStates[sid]?.lastSeq || 0
+    const messages = await ops.fetchMessages(this.client, sid, 50)
+    if (stale() || (this.sessionStates[sid]?.lastSeq || 0) !== lastSeq) return
+    const fresh = messages.filter(item => (item.seq || 0) > lastSeq)
+    // SSE 已经处理过本轮
+    if (!fresh.length) return
+    // continue 还没被 agent 消费，或本轮刚结束、SSE 可能马上就处理
+    const latestAt = Math.max(...fresh.map(item => Number(item.createdAt) || 0))
+    if (fresh.every(item => messageRole(item.content) === 'user') || Date.now() - latestAt < RETRY_WATCH_SETTLE_MS) {
+      return this.watchAutoContinue(sid)
+    }
+
+    logger.mark(`[hapi-connector] SSE 未收到本轮结束事件，主动补查自动 continue 结果: ${sid.slice(0, 8)}`)
+    this.sessionStates[sid] = { ...(this.sessionStates[sid] || {}), thinking: false }
+    await this.notifyMessages(sid, lastSeq)
   }
 
   inAutoApproveWindow() {

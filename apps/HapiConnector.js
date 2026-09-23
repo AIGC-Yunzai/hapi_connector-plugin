@@ -212,6 +212,9 @@ export class HapiConnector extends plugin {
         case 'resume':
         case '恢复':
           return this.cmdResume(e, arg)
+        case 'cancelretry':
+        case '取消重试':
+          return this.cmdCancelRetry(e, arg)
         case 'rename':
           return this.cmdRename(e, arg)
         case 'delete':
@@ -881,6 +884,57 @@ export class HapiConnector extends plugin {
     const [ok, msg] = await action(this.client, sid)
     if (ok) await this.refreshSessions()
     return this.reply(msg)
+  }
+
+  /**
+   * #hapi 取消重试 [序号|ID前缀|all]
+   * 不带参数时：当前 session 有重试则取消它，否则只有一个 session 在重试时取消那一个。
+   */
+  async cmdCancelRetry(e, arg) {
+    if (!sharedSse) return this.reply('SSE 未启动，没有自动重试')
+    // hub 不可达时也要能取消，列表刷新失败就用缓存
+    await this.refreshSessions().catch(() => { })
+    const retrying = sharedSse.autoRetrySids()
+    const target = String(arg || '').trim()
+
+    let sids
+    if (target.toLowerCase() === 'all' || target === '全部') {
+      sids = retrying
+    } else if (target) {
+      const sid = this.resolveSession(target)?.id
+        || (() => {
+          const matches = retrying.filter(id => id.startsWith(target))
+          return matches.length === 1 ? matches[0] : ''
+        })()
+      if (!sid) return this.reply(`未找到 session：${target}`)
+      sids = [sid]
+    } else {
+      const current = State.currentSid(e)
+      if (current && retrying.includes(current)) sids = [current]
+      else if (retrying.length === 1) sids = retrying
+      else if (!retrying.length) return this.reply('当前没有进行中的自动重试')
+      else {
+        return this.reply([
+          '有多个 session 在自动重试，请指定目标：',
+          ...retrying.map(id => `#hapi 取消重试 ${id.slice(0, 8)}`),
+          '#hapi 取消重试 all',
+        ].join('\n'))
+      }
+    }
+
+    const lines = []
+    for (const sid of sids) {
+      const result = sharedSse.cancelAutoRetry(sid)
+      const label = sessionLabel(sid, sessionsCache)
+      if (!result) {
+        lines.push(`该 session 没有进行中的自动重试\n${label}`)
+        continue
+      }
+      const detail = result.pending ? '已取消待发送的 continue' : '已停止自动重试'
+      lines.push(`${detail}（已重试 ${result.count}/${result.max}），再次报错会重新计数\n${label}`)
+    }
+    if (!lines.length) return this.reply('当前没有进行中的自动重试')
+    return this.reply(lines.join('\n\n'))
   }
 
   async cmdResume(e, arg) {

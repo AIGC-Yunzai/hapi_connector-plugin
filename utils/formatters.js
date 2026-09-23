@@ -532,6 +532,7 @@ export function helpNodes(topic = '', config = {}) {
       '#hapi machines          查看在线机器',
       '#hapi create <machineId> <目录> <agent> [simple|worktree] [模型] [推理强度] [权限模式] [yolo]',
       '#hapi abort [目标]      中断 session',
+      '#hapi 取消重试 [目标|all] 取消自动 continue 重试',
       '#hapi archive           归档当前 session',
       '#hapi resume [目标]     恢复 inactive session',
       '#hapi rename <标题>     重命名当前 session',
