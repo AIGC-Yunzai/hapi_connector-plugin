@@ -3,51 +3,43 @@
 # HAPI 服务地址，例如 http://127.0.0.1:3006
 hapi_endpoint: ""
 
-# HAPI Access Token，支持 token:namespace 格式；修改后会清理旧 JWT 并重连
+# HAPI Access Token，支持 token:namespace
 access_token: ""
 
-# 代理地址，支持 http:// 与 https:// 代理；SOCKS 代理需额外依赖，当前会忽略
+# HTTP/HTTPS 代理地址
 proxy_url: ""
 
-# Cloudflare Zero Trust Access Service Token，可留空
+# Cloudflare Access 凭据，可留空
 cf_access_client_id: ""
 cf_access_client_secret: ""
 
-# JWT 缓存策略，需与 HAPI 后端保持一致或略短
+# JWT 有效期与提前刷新时间（秒）
 jwt_lifetime: 900
 refresh_before_expiry: 180
 
-# SSE 推送级别：detail / simple / collapsed / summary / silence（戳一戳循环同序）
-# detail：显示 thinking，保留系统事件细节
-# simple：可见消息（可含 thinking），隐藏 ready、Context updated
-# collapsed：tools 合并为 1 个块且仅单行标题，不显示 thinking；隐藏 ready/token-count
-# summary：最后 N 条，不显示 thinking
-# silence：不推送
+# 推送级别：detail / simple / collapsed / summary / silence
 output_level: "simple"
 summary_msg_count: 5
 
-# thinking 最大字符数：0 = 所有级别都不显示思考；>0 时仅 simple/detail 显示并截断到该长度
-# collapsed / summary 始终不显示 thinking
+# 思考字数上限，仅 simple/detail 显示，0 关闭
 reasoning_max_chars: 2000
 
-# 推送 AI 回复的输出方式：text 仅文字 / image 仅图片 / both 图片+文字
+# 回复格式：text 文字 / image 图片 / both 两者
 markdown_output: "text"
 
-# Markdown 图片主题：auto 自动（06:00-17:59 浅色，其余深色）/ light 浅色 / dark 深色
-# 使用运行云崽的服务器本地时间，同时应用于 #hapi diff
+# 图片主题：auto 自动 / light 浅色 / dark 深色
 markdown_theme: "light"
 
-# 是否展示更多 session 信息。开启后，每次完成对话会额外通信获取最新权限/模型/思考强度
+# 展示会话权限、模型与思考强度
 more_session_info: false
 
-# 是否将分节点合并转发合并为单节点转发（仍按字数上限自动分隔）
-# 用于微信 OC 等不支持合并转发、会降级逐条发送且单周期消息条数有限的适配器
+# 合并转发为单节点，超长时分隔
 merge_forward_single_node: false
 
 # 是否启用快捷发送
 quick_send_enabled: true
 
-# 快捷发送前缀。默认 >消息 发到当前 session，>{2} 消息 发到第 2 个 session；留空关闭快捷发送
+# 快捷发送前缀，如 >消息 或 >{2} 消息
 quick_prefix: ">"
 
 # 群聊快捷发送是否必须 @Bot 才响应
@@ -68,21 +60,16 @@ max_reconnect_attempts: 30
 # 是否随插件启动 SSE 监听
 enable_sse: true
 
-# 小功能
-# 延迟 YOLO 模式：发送消息时若当前权限模式属于自动放行类
-# （bypassPermissions / yolo / safe-yolo / auto / acceptEdits / autoReview / always-proceed），
-# 先切到 default 发送，3 秒后自动恢复原模式
+# 自动放行模式下先切 default 发送，3 秒后恢复
 delay_yolo_mode: false
 
-# 命中 HAPI system-event 文本后，等待 1 分钟自动发送 continue 重试（大小写敏感）
-# 匹配范围：session event message（进程日志/退出原因）+ Claude <synthetic> 合成正文
-#（如 API Error: Request rejected (429) · Service Unavailable），不匹配正常 assistant 回复
-# HAPI / Claude 自身也会重试 API 报错，因此：
-# - 报错之后又出现 thinking / 工具调用 / 正常回复，视为已自行恢复，不排重试
-# - 倒计时结束发送前会再确认一次，期间恢复了就取消本次 continue
+# 系统事件及合成报错重试关键词，大小写敏感
 retry_error_strings:
   - "API Error: Request rejected"
+  - "We’re currently experiencing high demand, which may cause temporary errors"
+  - "Codex error: rate limit exceeded"
+# 最大自动重试次数，0 关闭
 retry_max_count: 10
 
-# 命中 retry_error_strings 后，自动发送 continue 前的等待时间（单位：分钟），默认 1
+# 自动重试等待时间（分钟）
 retry_delay_minutes: 1

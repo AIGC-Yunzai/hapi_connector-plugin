@@ -115,13 +115,15 @@ export function scanRetryMessages(messages, errorStrings = []) {
 }
 
 /**
- * 参与 retry_error_strings 匹配的消息，只放行两类：
+ * 参与 retry_error_strings 匹配的消息：
  * - session event 的 message（HAPI 转发的进程日志、退出原因）
+ * - 明确的 error 事件（session error、Codex error / task_failed）
  * - Claude 的 <synthetic> 合成正文（API Error: Request rejected (429) 这类报错走 assistant 通道下发）
  * 正常 assistant 回复不参与，避免正文里提到关键词就误触发重试。
  */
 function isRetryMatchCandidate(item) {
   if (!item) return false
+  if (item.kind === 'error') return true
   if (item.kind === 'session-event' && item.event?.type === 'message') return true
   return item.kind === 'assistant-reply' && item.syntheticError === true
 }
