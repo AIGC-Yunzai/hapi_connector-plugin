@@ -117,7 +117,7 @@ export function scanRetryMessages(messages, errorStrings = []) {
 /**
  * 参与 retry_error_strings 匹配的消息：
  * - session event 的 message（HAPI 转发的进程日志、退出原因）
- * - 明确的 error 事件（session error、Codex error / task_failed）
+ * - 明确的 error 事件（含 Codex 转存为 message 的 task_failed）
  * - Claude 的 <synthetic> 合成正文（API Error: Request rejected (429) 这类报错走 assistant 通道下发）
  * 正常 assistant 回复不参与，避免正文里提到关键词就误触发重试。
  */
@@ -450,6 +450,14 @@ function classifyCodexPayload(message, data) {
   }
 
   if (data.type === 'message' && typeof data.message === 'string') {
+    // HAPI 转存 task_failed 时会改成 message，事件来源仍保留在稳定 ID 中。
+    // 按结构标记识别，避免普通回复引用报错文本时误触发重试。
+    const failed = [data.id, message?.localId].some(id =>
+      typeof id === 'string' && /^codex:.+:task_failed$/.test(id),
+    )
+    if (failed) {
+      return buildClassified('error', message, data.message, { event: { type: 'error', message: data.message } })
+    }
     return buildClassified('assistant-reply', message, data.message)
   }
 

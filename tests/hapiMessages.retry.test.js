@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { scanRetryMessages } from '../utils/hapiMessages.js'
+import { classifyHapiMessage, scanRetryMessages } from '../utils/hapiMessages.js'
 
 const errorText = 'Codex error: rate limit exceeded'
 
@@ -79,4 +79,56 @@ test('errors require a configured case-sensitive substring', () => {
   assert.deepEqual(scanRetryMessages(messages, ['rate limit exceeded']), {
     matched: 'rate limit exceeded', errorSeq: 7, progressSeq: 0,
   })
+})
+
+// HAPI 将 task_failed 转成 codex/message，失败来源保留在 data.id / localId。
+function storedFailure(seq, suffix = 'task_failed') {
+  const id = `codex:test-thread:test-turn:event-${seq}:${suffix}`
+  return {
+    ...agentMessage(seq, 'codex', {
+      type: 'message', message: `${errorText}: Token rate limit exceeded.`, id,
+    }),
+    localId: id,
+  }
+}
+
+for (const idField of ['both', 'payload', 'local']) {
+  test(`stored Codex failure is an error with ${idField} ID`, () => {
+    const message = storedFailure(155)
+    if (idField === 'payload') delete message.localId
+    if (idField === 'local') delete message.content.content.data.id
+    const item = classifyHapiMessage(message)
+    assert.equal(item.kind, 'error')
+    assert.equal(item.text, message.content.content.data.message)
+    assert.deepEqual(scanRetryMessages([message], [errorText]), {
+      matched: errorText, errorSeq: 155, progressSeq: 0,
+    })
+  })
+}
+
+test('stored failure / ready / duplicate failure sequence still requires retry', () => {
+  const messages = [
+    agentMessage(152, 'codex', { type: 'reasoning', message: 'Working' }),
+    storedFailure(155),
+    agentMessage(156, 'event', { type: 'ready' }),
+    storedFailure(157),
+  ]
+  assert.deepEqual(scanRetryMessages(messages, [errorText]), {
+    matched: errorText, errorSeq: 157, progressSeq: 152,
+  })
+  messages.push(agentMessage(159, 'codex', { type: 'message', message: 'Recovered' }))
+  assert.deepEqual(scanRetryMessages(messages, [errorText]), {
+    matched: errorText, errorSeq: 157, progressSeq: 159,
+  })
+})
+
+test('normal Codex messages quoting the error or failure ID remain normal replies', () => {
+  for (const suffix of ['agent_message', 'task_failed:agent_message']) {
+    const message = storedFailure(7, suffix)
+    message.content.content.data.message += ' codex:thread:turn:hash:task_failed'
+    assert.equal(classifyHapiMessage(message).kind, 'assistant-reply')
+    assert.deepEqual(scanRetryMessages([message], [errorText]), {
+      matched: '', errorSeq: 0, progressSeq: 7,
+    })
+  }
 })
