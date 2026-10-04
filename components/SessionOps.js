@@ -1,4 +1,6 @@
-﻿export async function fetchSessions(client) {
+﻿import { randomUUID } from 'node:crypto'
+
+export async function fetchSessions(client) {
   const data = await client.requestJson('GET', '/api/sessions')
   return data.sessions || []
 }
@@ -169,7 +171,8 @@ export async function fetchGeneratedImage(client, sid, imageId) {
 }
 
 export async function sendMessage(client, sid, text, attachments = []) {
-  const payload = { text }
+  // 关联 Hub 投递与 CLI 回传；同一次请求重发复用 ID，独立发送生成新 ID。
+  const payload = { text, localId: `local-${randomUUID()}` }
   if (attachments.length) payload.attachments = attachments
   const res = await client.post(`/api/sessions/${sid}/messages`, { json: payload })
   if (res.ok) return [true, `已发送 -> [${sid.slice(0, 8)}]`]
