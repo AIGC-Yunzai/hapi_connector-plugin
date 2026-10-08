@@ -1,4 +1,3 @@
-import puppeteer from '../../../lib/puppeteer/puppeteer.js'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -143,6 +142,7 @@ export async function buildMarkdownOutputs(mode, textPayload, markdownContent, t
 export async function renderMarkdownImage(content, theme = 'light') {
   if (!content || !String(content).trim()) return false
   try {
+    const { default: puppeteer } = await import('../../../lib/puppeteer/puppeteer.js')
     const themeClass = resolveMarkdownTheme(theme) === 'dark' ? 'theme-dark' : 'theme-light'
     const img = await puppeteer.screenshot('hapi-markdown', {
       _path,

@@ -202,7 +202,7 @@ export class SseListener {
 
   async handle(evt) {
     if (evt.type === 'message-received') {
-      this.handleMessageReceived(evt)
+      await this.handleMessageReceived(evt)
       return
     }
     if (evt.type === 'session-ended' || evt.type === 'session-removed') {
@@ -223,6 +223,7 @@ export class SseListener {
     const thinking = data.thinking ?? old.thinking ?? false
     const wasThinking = old.thinking ?? false
     this.sessionStates[sid] = {
+      ...old,
       active: data.active ?? old.active ?? false,
       thinking,
       lastSeq: oldSeq,
@@ -245,12 +246,28 @@ export class SseListener {
     }
   }
 
-  handleMessageReceived(evt) {
+  async handleMessageReceived(evt) {
     const sid = evt.sessionId
     if (!sid) return
 
     const content = evt.message?.content || {}
     const role = messageRole(content)
+    // 已完成的提案可在审批请求之后、甚至 thinking=false 之后才入库。
+    // 收到正文即推送；lastPlanSeq 让审批拉取和回合结束拉取不会重复发送。
+    if (role === 'agent' || role === 'assistant') {
+      if (this.config?.output_level === 'silence') return
+      const lastPlanSeq = this.sessionStates[sid]?.lastPlanSeq || 0
+      const plans = classifyHapiMessages([evt.message], { includeUsers: false })
+        .filter(item => item.event?.type === 'plan-proposal' && item.seq > lastPlanSeq)
+      if (plans.length) {
+        try {
+          await this.outputPlanItems(sid, plans)
+        } catch (err) {
+          logger.warn(`[hapi-connector] 推送 Plan 消息失败: ${err.message || err}`)
+        }
+      }
+      return
+    }
     if (role !== 'user') return
 
     const text = (extractTextPreview(content) || '').trim()
@@ -368,7 +385,7 @@ export class SseListener {
       })
         .filter(item => this.shouldOutputClassifiedMessage(item))
 
-      // Plan 独立输出：plan / plan_update 消息不混入会话正文，
+      // Plan 独立输出：进度计划和 Plan proposal 不混入会话正文，
       // 单独作为一条合并转发 / 一张 markdown 图片推送。
       const lastPlanSeq = this.sessionStates[sid]?.lastPlanSeq || 0
       const planItems = classified.filter(item => item.kind === 'plan' && (item.seq || 0) > lastPlanSeq)
@@ -393,7 +410,7 @@ export class SseListener {
       }
 
       if (planItems.length) {
-        await this.outputPlanItems(sid, planItems, latestSeq)
+        await this.outputPlanItems(sid, planItems)
       }
 
       // 发送 generated-image 图片（单独发送，不放入 markdown 渲染）
@@ -422,7 +439,7 @@ export class SseListener {
    * - both：节点 + 图片
    * 输出后记录 lastPlanSeq，避免同一批 plan 消息被重复推送。
    */
-  async outputPlanItems(sid, planItems, latestSeq = 0) {
+  async outputPlanItems(sid, planItems) {
     const planNodes = planItems.map(formatClassifiedMessage).filter(Boolean)
     if (!planNodes.length) return
     const markdown = formatPlanMarkdown(planItems)
@@ -436,7 +453,6 @@ export class SseListener {
     const state = this.sessionStates[sid] || {}
     const maxPlanSeq = Math.max(
       Number(state.lastPlanSeq) || 0,
-      Number(latestSeq) || 0,
       ...planItems.map(item => item.seq || 0),
     )
     this.sessionStates[sid] = { ...state, lastPlanSeq: maxPlanSeq }
@@ -461,8 +477,7 @@ export class SseListener {
         .filter(item => this.shouldOutputClassifiedMessage(item))
         .filter(item => item.kind === 'plan' && (item.seq || 0) > lastPlanSeq)
       if (!planItems.length) return
-      const latestSeq = Math.max(...messages.map(item => item.seq || 0))
-      await this.outputPlanItems(sid, planItems, latestSeq)
+      await this.outputPlanItems(sid, planItems)
     } catch (err) {
       logger.warn(`[hapi-connector] 推送 Plan 消息失败: ${err.message || err}`)
     }

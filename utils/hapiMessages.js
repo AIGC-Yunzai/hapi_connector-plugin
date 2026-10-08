@@ -472,6 +472,15 @@ function classifyCodexPayload(message, data) {
 
   if (data.type === 'tool-call' && typeof data.callId === 'string') {
     const callId = firstString(data.callId, data.id)
+    // HAPI 的 Plan proposal 是 ExitPlanMode 工具，正文在 input.plan。
+    // 必须在普通工具摘要/折叠之前提取，否则只剩工具名。
+    const plan = extractPlanProposalText(data.name, data.input)
+    if (plan) {
+      return buildClassified('plan', message, plan, {
+        callId,
+        event: { type: 'plan-proposal', callId },
+      })
+    }
     return buildClassified('tool-call', message, formatToolCall(data.name, data.input), {
       callId,
       event: { type: 'tool-call', callId, status: firstString(data.status) || undefined },
@@ -602,6 +611,11 @@ function extractPlainText(value) {
   return ''
 }
 
+export function extractPlanProposalText(name, input) {
+  if (name !== 'ExitPlanMode' && name !== 'exit_plan_mode') return ''
+  return typeof input?.plan === 'string' ? input.plan.trim() : ''
+}
+
 function formatPlanText(data) {
   const entries = normalizePlanEntries(data)
   if (!entries.length) return ''
@@ -613,7 +627,7 @@ function formatPlanText(data) {
 
 /**
  * 把 plan 分类项组装成独立的 Plan markdown 文档（供 markdown 图片渲染）。
- * 每个 plan 项文本已是 `- [ ] 步骤` 形式，直接拼装为 `# Plan` 文档。
+ * 正文可以是进度复选框或 Plan proposal 的完整 Markdown，直接拼装为 `# Plan` 文档。
  * @param {Array|Object} items plan 分类项（kind === 'plan'）
  * @returns {string} markdown 文本；无内容时返回空串
  */

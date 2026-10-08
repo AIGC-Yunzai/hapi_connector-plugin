@@ -1,4 +1,4 @@
-import { formatHapiMessageNodes } from './hapiMessages.js'
+import { extractPlanProposalText, formatHapiMessageNodes } from './hapiMessages.js'
 import { getFlavorDisplay } from './flavorProfiles.js'
 import { normalizePokeAction } from './pokeActions.js'
 
@@ -44,6 +44,8 @@ function extractInner(value, limit) {
   if (['generated-image', 'generated_image'].includes(type)) return ''
   if (['tool_result', 'tool-call-result', 'token_count'].includes(type)) return ''
   if (['tool_use', 'tool-call'].includes(type)) {
+    const plan = extractPlanProposalText(value.name, value.input)
+    if (plan) return plan.slice(0, limit)
     const name = value.name || '?'
     const input = value.input && typeof value.input === 'object' ? value.input : {}
     const command = Array.isArray(input.command)
