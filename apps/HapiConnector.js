@@ -61,6 +61,9 @@ let booting = null
 
 const UPLOAD_CONCURRENCY = 3
 
+/** setTimeout 延时上限为 2^31-1 ms，超出会被按立即触发处理；重试等待分钟数以此为上限 */
+const MAX_RETRY_DELAY_MINUTES = Math.floor((2 ** 31 - 1) / 60000)
+
 const HAPI_RUNNER_HINT = [
   '没有在线 machine。',
   '请参考 README 安装教程，先在运行 HAPI 的控制台启动 Hapi runner，例如：',
@@ -215,6 +218,9 @@ export class HapiConnector extends plugin {
         case 'cancelretry':
         case '取消重试':
           return this.cmdCancelRetry(e, arg)
+        case 'retrydelay':
+        case '重试等待时间':
+          return this.cmdRetryDelay(e, arg)
         case 'rename':
           return this.cmdRename(e, arg)
         case 'delete':
@@ -935,6 +941,26 @@ export class HapiConnector extends plugin {
     }
     if (!lines.length) return this.reply('当前没有进行中的自动重试')
     return this.reply(lines.join('\n\n'))
+  }
+
+  /**
+   * #hapi 重试等待时间 [分钟]
+   * 不带参数时显示当前值并等待输入；修改后立即对新的自动 continue 重试生效。
+   */
+  async cmdRetryDelay(e, arg) {
+    let input = String(arg || '').trim()
+    if (!input) {
+      const current = this.config?.retry_delay_minutes ?? 1
+      input = await this.awaitSettingArg(e, `当前重试等待时间: ${current} 分钟\n请在 120 秒内发送新的分钟数（1-${MAX_RETRY_DELAY_MINUTES} 之间的整数），发送“取消”退出`)
+      if (!input) return true
+    }
+    const minutes = Number(input)
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > MAX_RETRY_DELAY_MINUTES) {
+      return this.reply(`无效值：${input}\n请发送 1-${MAX_RETRY_DELAY_MINUTES} 之间的整数（单位：分钟）`)
+    }
+    Config.updateConfig('retry_delay_minutes', minutes)
+    sharedSse?.start(Config.getConfig())
+    return this.reply(`重试等待时间已修改为: ${minutes} 分钟`)
   }
 
   async cmdResume(e, arg) {

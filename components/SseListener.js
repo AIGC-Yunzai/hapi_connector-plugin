@@ -689,7 +689,7 @@ export class SseListener {
       const prefix = state.resetCountdown
         ? '再次触发 HAPI 报错，重试倒计时已重置'
         : '检测到 HAPI 报错'
-      this.notify(`${prefix}，将在 ${delayMin} 分钟后自动发送 continue 重试 (${attempt}/${max})。\n命中报错：${matched}\n可用指令：#hapi 取消重试 ${sid.slice(0, 8)}\n${sessionLabel(sid, this.sessions)}`, sid).catch(() => { })
+      this.notify(`${prefix}，将在 ${delayMin} 分钟后自动发送 continue 重试 (${attempt}/${max})。\n命中报错：${matched}\n可用指令：\n #hapi 取消重试 ${sid.slice(0, 8)}\n #hapi 重试等待时间[分钟]\n\n${sessionLabel(sid, this.sessions)}`, sid).catch(() => { })
     }
     state.resetCountdown = false
     this.stopAutoContinueWatch(state)

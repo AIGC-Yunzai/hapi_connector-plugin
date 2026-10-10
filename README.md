@@ -125,6 +125,7 @@ access_token: "your-token"
 #hapi create <machineId> <目录> <agent> [...]    创建 session
 #hapi abort [序号|ID前缀]                        中断 session
 #hapi 取消重试 [序号|ID前缀|all]                 取消自动 continue 重试（别名 cancelretry）
+#hapi 重试等待时间 [分钟]                        查看/修改自动 continue 重试等待时间（别名 retrydelay）
 #hapi archive                                   归档当前 session
 #hapi resume [序号|ID前缀]                       恢复 inactive session
 #hapi rename <新标题>                            重命名当前 session
