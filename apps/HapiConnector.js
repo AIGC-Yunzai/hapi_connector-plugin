@@ -3,6 +3,7 @@ import Config from '../components/Config.js'
 import State from '../components/State.js'
 import { HapiClient } from '../components/HapiClient.js'
 import { SseListener } from '../components/SseListener.js'
+import { QQBOT_HELP, handleQQBotCommand } from '../components/QQBotAdmin.js'
 import * as ops from '../components/SessionOps.js'
 import {
   deleteUploadedFile,
@@ -14,6 +15,8 @@ import {
 } from '../components/FileOps.js'
 import { smartReply } from '../utils/reply.js'
 import { buildMarkdownOutputs, nodesToMarkdown, renderMarkdownImage } from '../utils/markdownPic.js'
+import { resolveChannelProfile } from '../utils/channelProfile.js'
+import { materializeChannelOutput, planQQBotOutput, toNativeMarkdown } from '../utils/channelOutput.js'
 import { collectGeneratedImagesFromMessages, imageSegmentFromBuffer } from '../utils/generatedImages.js'
 import {
   buildDiffMarkdownPages,
@@ -131,7 +134,13 @@ export class HapiConnector extends plugin {
       }
       return
     }
-    sharedSse ||= new SseListener(this.client, sessionsCache, this.pushNotification.bind(this), State)
+    sharedSse ||= new SseListener(
+      this.client,
+      sessionsCache,
+      this.pushNotification.bind(this),
+      State,
+      this.profileForSession.bind(this),
+    )
     if (restart) sharedSse.restart(config)
     else sharedSse.start(config)
   }
@@ -156,10 +165,17 @@ export class HapiConnector extends plugin {
 
   async hapi(e) {
     if (!e.isMaster) return false
-    if (!(await this.ready(e))) return true
     const text = String(e.msg || '').replace(/^[/#]hapi/i, '').trim()
     const [cmdRaw = '', ...rest] = splitArgs(text)
     const cmd = cmdRaw.toLowerCase()
+
+    // QQ 官方机器人管理不依赖 hapi 连接，放在 ready 检查之前
+    if (cmd === 'qqbot') {
+      if (!rest.length) return this.reply(QQBOT_HELP)
+      return handleQQBotCommand(e, rest, (msg, quote) => this.reply(msg, quote))
+    }
+
+    if (!(await this.ready(e))) return true
     const arg = rest.join(' ')
 
     if (!cmd || cmd === 'help' || cmd === '帮助') return this.reply(helpNodes(arg, this.config))
@@ -534,13 +550,21 @@ export class HapiConnector extends plugin {
       ? sessionLabelWithRuntime(detail || sid, detail ? [detail] : sessionsCache)
       : sessionLabel(sid, sessionsCache)
     const nodes = [header, ...formatMessageNodes(messages)]
-    const outs = await buildMarkdownOutputs(
-      this.config?.markdown_output,
-      nodes,
-      nodesToMarkdown(nodes),
-      this.config?.markdown_theme,
-    )
-    for (const out of outs) await this.reply(out)
+    // 手动查看也是一次性导出：套用当前窗口的输出方式，但不做摘要拆分
+    const profile = resolveChannelProfile(State.windowKey(e), this.config)
+    if (profile.isOfficial) {
+      for (const plan of planQQBotOutput(nodes.slice(1), -1, header, profile)) {
+        for (const out of await materializeChannelOutput(plan, this.config?.markdown_theme)) await this.reply(out)
+      }
+    } else {
+      const outs = await buildMarkdownOutputs(
+        profile.markdownOutput,
+        nodes,
+        nodesToMarkdown(nodes),
+        this.config?.markdown_theme,
+      )
+      for (const out of outs) await this.reply(out)
+    }
     await this.replyGeneratedImages(sid, collectGeneratedImagesFromMessages(messages))
     return
   }
@@ -1524,11 +1548,35 @@ export class HapiConnector extends plugin {
     }
   }
 
-  async pushNotification(text, sid) {
+  /**
+   * 推送的发送出口：会话有归属窗口就用它；没有会话（例如 SSE 断连告警）
+   * 就退回进程内缓存过的第一个窗口，至少让消息发得出去。
+   * @param {string} sid
+   */
+  windowKeyForSession(sid) {
     const session = sid ? sessionsCache.find(item => item.id === sid) : null
-    const key = session ? State.windowForSession(session) : [...State.eventCache.keys()][0]
+    return session
+      ? State.windowForSession(session)
+      : [...State.eventCache.keys()][0] || ''
+  }
+
+  /**
+   * 会话自己的通道策略。没有会话归属时用全局配置——不能把某个官方 bot 的
+   * 策略套到与它无关的通知上。
+   * @param {string} sid
+   */
+  profileForSession(sid) {
+    const session = sid ? sessionsCache.find(item => item.id === sid) : null
+    return resolveChannelProfile(session ? State.windowForSession(session) : '', this.config)
+  }
+
+  async pushNotification(text, sid) {
+    const key = this.windowKeyForSession(sid)
     if (!key) return
-    const msg = splitLong(text)
+    // 官方 bot 不发合并转发：节点数组直接拍成 markdown 文本再发。
+    // 适配器那层也会拍平，但这里是更靠前的出口，省掉「先包转发再拆」。
+    const profile = this.profileForSession(sid)
+    const msg = splitLong(profile.isOfficial && Array.isArray(text) ? toNativeMarkdown(text) : text)
     const event = await buildEventFromWindowKey(key)
     if (event?.reply) {
       try {

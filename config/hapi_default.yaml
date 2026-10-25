@@ -27,6 +27,14 @@ reasoning_max_chars: 2000
 # 回复格式：text 文字 / image 图片 / both 两者
 markdown_output: "text"
 
+# ---- 官方 QQ 机器人通道（只对官方 bot 生效，OneBot 不受影响）----
+# 推送级别：inherit 跟随上面的 output_level / detail / simple / collapsed / summary / silence
+qqbot_output_level: "inherit"
+# 输出方式：text 文字 / image 图片 / both 两者
+qqbot_markdown_output: "text"
+# 摘要回复（AI 收尾那段给用户看的总结）始终以原生 markdown 文本发送
+qqbot_summary_markdown: true
+
 # 图片主题：auto 自动 / light 浅色 / dark 深色
 markdown_theme: "light"
 

@@ -1,4 +1,10 @@
 import Config from './components/Config.js'
+import { qqbotAdapter } from './adapter/QQBotOfficial.js'
+import { accountStore } from './adapter/qqbot/store.js'
+import { applyQQBotAccountDiff, buildQQBotAccountCards, diffQQBotAccounts } from './utils/qqbotAccounts.js'
+
+/** 只读展示字段：提交时剔除，不落进主配置 */
+const QQBOT_DISPLAY_FIELDS = new Set(['qqbot_accounts', 'qqbot_login_hint'])
 
 export function supportGuoba() {
   // 只读「帮助」标签页：label 写功能标题，只读 input 内容(defaultValue)写指令。
@@ -326,23 +332,132 @@ export function supportGuoba() {
           componentProps: { min: 1, step: 1 },
         },
         {
+          label: 'QQ Bot',
+          component: 'SOFT_GROUP_BEGIN',
+        },
+        {
+          component: 'Divider',
+          label: '账号',
+          componentProps: { orientation: 'left', plain: true },
+        },
+        {
+          field: 'qqbot_login_hint',
+          label: '添加机器人',
+          component: 'Input',
+          componentProps: { readonly: true, defaultValue: '#hapi qqbot login' },
+          bottomHelpMessage: '新增只能扫码：在聊天里发送该指令，扫弹出的二维码即可。停用或删除在这里操作，AppSecret 不展示也不提交',
+        },
+        {
+          field: 'qqbot_accounts',
+          label: '已添加的机器人',
+          component: 'GSubForm',
+          bottomHelpMessage: '关闭「启用」会立即断开连接并保留凭证；删除会抹掉本地凭证。新增的卡片会被忽略，请用上面的指令扫码添加',
+          componentProps: {
+            multiple: true,
+            modalProps: { title: '机器人' },
+            schemas: [
+              {
+                field: 'appid',
+                label: 'AppID',
+                component: 'Input',
+                componentProps: { readonly: true },
+              },
+              {
+                field: 'remark',
+                label: '备注',
+                component: 'Input',
+                bottomHelpMessage: '仅用于区分多个机器人的用途',
+              },
+              {
+                field: 'status',
+                label: '状态',
+                component: 'Input',
+                componentProps: { readonly: true },
+                bottomHelpMessage: '只读；在线状态以网关连接为准',
+              },
+              {
+                field: 'enabled',
+                label: '启用',
+                component: 'Switch',
+                bottomHelpMessage: '关闭后断开连接但保留凭证，重新打开会立即重连',
+              },
+            ],
+          },
+        },
+        {
+          component: 'Divider',
+          label: '通道设置',
+          componentProps: { orientation: 'left', plain: true },
+        },
+        {
+          field: 'qqbot_output_level',
+          label: '推送级别',
+          component: 'Select',
+          componentProps: {
+            options: [
+              { label: '跟随全局', value: 'inherit' },
+              { label: 'detail', value: 'detail' },
+              { label: 'simple', value: 'simple' },
+              { label: 'collapsed', value: 'collapsed' },
+              { label: 'summary', value: 'summary' },
+              { label: 'silence', value: 'silence' },
+            ],
+          },
+          bottomHelpMessage: '只影响官方机器人通道，OneBot 群聊仍按「推送设置」里的全局级别。跟随全局时与上面保持一致',
+        },
+        {
+          field: 'qqbot_markdown_output',
+          label: '输出方式',
+          component: 'Select',
+          componentProps: {
+            options: [
+              { label: '仅文字', value: 'text' },
+              { label: '仅图片', value: 'image' },
+              { label: '图片 + 文字', value: 'both' },
+            ],
+          },
+          bottomHelpMessage: '官方机器人支持原生 markdown，通常选「仅文字」；选「仅图片」时摘要仍以文本发送，其余内容渲染为图片',
+        },
+        {
+          field: 'qqbot_summary_markdown',
+          label: '摘要固定走 Markdown',
+          component: 'Switch',
+          bottomHelpMessage: '开启后，AI 收尾那段总结（含表格、序号）始终以原生 markdown 文本发送；关闭则完全按上面的输出方式处理',
+        },
+        {
           label: '帮助',
           component: 'SOFT_GROUP_BEGIN',
         },
         ...helpSchemas,
       ],
       getConfigData() {
-        return Config.getConfig()
+        return {
+          ...Config.getConfig(),
+          qqbot_accounts: buildQQBotAccountCards(accountStore.list(), appid => qqbotAdapter.status(appid)),
+        }
       },
-      setConfigData(data, { Result }) {
+      async setConfigData(data, { Result }) {
         try {
+          const submitted = data.qqbot_accounts
           const config = Config.getConfig()
           for (const [key, value] of Object.entries(data)) {
-            if (key.startsWith('help_')) continue
+            if (key.startsWith('help_') || QQBOT_DISPLAY_FIELDS.has(key)) continue
             config[key] = value
           }
           config.hapi_endpoint = String(config.hapi_endpoint || '').replace(/\/+$/, '')
           Config.setConfig(config)
+
+          // 只有拿到卡片数组时才做账号差异。拿不到（老页面 / 字段被裁）就当没改过，
+          // 绝不能把「空数组」理解成「全部删除」。
+          if (Array.isArray(submitted)) {
+            const diff = diffQQBotAccounts(accountStore.list(), submitted)
+            const applied = await applyQQBotAccountDiff(diff, qqbotAdapter)
+            if (applied.errors.length) {
+              const detail = applied.errors.map(item => `${item.appid}：${item.message}`).join('；')
+              return Result.error(`配置已保存，但机器人账号操作失败：${detail}`)
+            }
+          }
+
           return Result.ok({}, '保存成功，连接与 SSE 配置会自动热更新')
         } catch (err) {
           return Result.error(`保存失败：${err.message || err}`)

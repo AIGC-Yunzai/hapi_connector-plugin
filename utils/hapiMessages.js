@@ -1,3 +1,5 @@
+import { splitNotifySummary } from './notifySummary.js'
+
 const AGENT_MESSAGE_PAYLOAD_TYPE = 'codex'
 
 const VISIBLE_SYSTEM_SUBTYPES = new Set([
@@ -525,13 +527,23 @@ function classifyCodexPayload(message, data) {
 function buildClassified(kind, message, text, extra = {}) {
   const clean = String(text || '').trim()
   if (!clean) return null
-  return {
+  const item = {
     kind,
     label: labelForKind(kind),
     seq: Number(message?.seq) || 0,
     text: clean,
     ...extra,
   }
+  // 页脚剥离无条件生效（与推送级别、输出方式无关）：正文给用户看，
+  // 解析出的字段留给摘要消息判定。只剩页脚时 text 为空，由格式化阶段丢弃。
+  if (kind === 'assistant-reply') {
+    const split = splitNotifySummary(clean)
+    if (split) {
+      item.text = split.visibleText
+      item.notifySummary = split.summary
+    }
+  }
+  return item
 }
 
 function labelForKind(kind) {

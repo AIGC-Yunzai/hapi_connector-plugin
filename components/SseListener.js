@@ -8,6 +8,9 @@ import {
   sessionLabelWithRuntime,
 } from '../utils/formatters.js'
 import { buildMarkdownOutputs, nodesToMarkdown } from '../utils/markdownPic.js'
+import { globalProfile, splitsSummary } from '../utils/channelProfile.js'
+import { materializeChannelOutput, planQQBotOutput } from '../utils/channelOutput.js'
+import { selectSummaryItem } from '../utils/notifySummary.js'
 import { collectGeneratedImagesFromMessages, imageSegmentFromBuffer } from '../utils/generatedImages.js'
 import {
   formatClassifiedMessage,
@@ -51,11 +54,19 @@ function retryMaxCount(config = {}) {
 }
 
 export class SseListener {
-  constructor(client, sessions, notify, stateStore = null) {
+  /**
+   * @param {object} client
+   * @param {Array} sessions
+   * @param {(text: any, sid: string) => Promise<void>} notify
+   * @param {object} [stateStore]
+   * @param {(sid: string) => object | null} [profileFor] 解析会话所属窗口的通道策略
+   */
+  constructor(client, sessions, notify, stateStore = null, profileFor = null) {
     this.client = client
     this.sessions = sessions
     this.notify = notify
     this.stateStore = stateStore
+    this.profileFor = profileFor
     this.pending = {}
     this.sessionStates = {}
     this.freeIndices = new Set()
@@ -255,7 +266,7 @@ export class SseListener {
     // 已完成的提案可在审批请求之后、甚至 thinking=false 之后才入库。
     // 收到正文即推送；lastPlanSeq 让审批拉取和回合结束拉取不会重复发送。
     if (role === 'agent' || role === 'assistant') {
-      if (this.config?.output_level === 'silence') return
+      if (this.isSilent(sid)) return
       const lastPlanSeq = this.sessionStates[sid]?.lastPlanSeq || 0
       const plans = classifyHapiMessages([evt.message], { includeUsers: false })
         .filter(item => item.event?.type === 'plan-proposal' && item.seq > lastPlanSeq)
@@ -370,43 +381,57 @@ export class SseListener {
 
       this.handleAutoContinueRetry(sid, newMessages)
 
-      if (this.config?.output_level === 'silence') return
+      const profile = this.channelProfile(sid)
+      if (profile.outputLevel === 'silence') return
 
       // detail：显示 thinking，保留系统事件细节
       // simple：可见消息 + thinking（reasoning_max_chars>0 时），隐藏 ready/token-count
       // collapsed：tools 合并为 1 块且仅单行标题，不显示 thinking；隐藏 ready/token-count
       // summary：不显示 thinking，隐藏 ready/token-count，只取最后 N 条
       // reasoning_max_chars=0：所有级别都不显示 thinking
-      const outputLevel = this.config?.output_level || 'simple'
+      const outputLevel = profile.outputLevel || 'simple'
       const classified = classifyHapiMessages(newMessages, {
         includeUsers: false,
         reasoningMaxChars: this.config?.reasoning_max_chars,
         collapseActivity: outputLevel === 'collapsed',
       })
-        .filter(item => this.shouldOutputClassifiedMessage(item))
+        .filter(item => this.shouldOutputClassifiedMessage(item, profile))
 
       // Plan 独立输出：进度计划和 Plan proposal 不混入会话正文，
       // 单独作为一条合并转发 / 一张 markdown 图片推送。
       const lastPlanSeq = this.sessionStates[sid]?.lastPlanSeq || 0
       const planItems = classified.filter(item => item.kind === 'plan' && (item.seq || 0) > lastPlanSeq)
       const others = classified.filter(item => item.kind !== 'plan')
-      const visible = others.map(formatClassifiedMessage).filter(Boolean)
 
       const generatedImages = collectGeneratedImagesFromMessages(newMessages)
 
       const count = Number(this.config?.summary_msg_count || 5)
       const picked = outputLevel === 'summary' ? others.slice(-count) : others
-      const pickedNodes = picked.map(formatClassifiedMessage).filter(Boolean)
+      const summaryItem = splitsSummary(profile) ? selectSummaryItem(picked) : null
+      const pickedNodes = []
+      let summaryIndex = -1
+      for (const item of picked) {
+        const node = formatClassifiedMessage(item)
+        if (!node) continue
+        if (item === summaryItem) summaryIndex = pickedNodes.length
+        pickedNodes.push(node)
+      }
       if (pickedNodes.length) {
         const header = await this.buildSessionHeader(sid)
-        const payload = [header, ...pickedNodes]
-        const outs = await buildMarkdownOutputs(
-          this.config?.markdown_output,
-          payload,
-          nodesToMarkdown(payload),
-          this.config?.markdown_theme,
-        )
-        for (const out of outs) await this.notify(out, sid)
+        if (profile.isOfficial) {
+          // 官方 bot：不构造合并转发段，直接产出原生 markdown / 图片
+          const plans = planQQBotOutput(pickedNodes, summaryIndex, header, profile)
+          for (const plan of plans) await this.emitChannelOutput(plan, sid)
+        } else {
+          const payload = [header, ...pickedNodes]
+          const outs = await buildMarkdownOutputs(
+            profile.markdownOutput,
+            payload,
+            nodesToMarkdown(payload),
+            this.config?.markdown_theme,
+          )
+          for (const out of outs) await this.notify(out, sid)
+        }
       }
 
       if (planItems.length) {
@@ -424,7 +449,7 @@ export class SseListener {
       }
 
       // 仅图片模式下不发「会话已完成」文字，避免图片后又跟一句纯文字提示
-      if (this.config?.markdown_output !== 'image') {
+      if (profile.markdownOutput !== 'image') {
         await this.notify(`【会话已完成，等待新的输入】\n${sessionLabel(sid, this.sessions)}`, sid)
       }
     } catch (err) {
@@ -433,19 +458,31 @@ export class SseListener {
   }
 
   /**
-   * 独立输出 plan md：适配 markdown_output 三种模式。
-   * - text：plan 作为独立合并转发节点
+   * 发送一块通道产出：markdown 直接发文本，image 渲染成图片。
+   * 渲染失败时退回文本，避免内容整块丢失。
+   * @param {{ kind: string, content?: string, markdown?: string }} plan
+   * @param {string} sid
+   */
+  async emitChannelOutput(plan, sid) {
+    const outs = await materializeChannelOutput(plan, this.config?.markdown_theme)
+    for (const out of outs) await this.notify(out, sid)
+  }
+
+  /**
+   * 独立输出 plan md：适配输出方式的三种模式。
+   * - text：plan 作为一条文本（官方 bot 直接发 markdown，其它通道走合并转发节点）
    * - image：plan md 渲染为一张 markdown 图片
-   * - both：节点 + 图片
+   * - both：文本 + 图片
    * 输出后记录 lastPlanSeq，避免同一批 plan 消息被重复推送。
    */
   async outputPlanItems(sid, planItems) {
     const planNodes = planItems.map(formatClassifiedMessage).filter(Boolean)
     if (!planNodes.length) return
+    const profile = this.channelProfile(sid)
     const markdown = formatPlanMarkdown(planItems)
     const outs = await buildMarkdownOutputs(
-      this.config?.markdown_output,
-      planNodes,
+      profile.markdownOutput,
+      profile.isOfficial ? markdown : planNodes,
       markdown,
       this.config?.markdown_theme,
     )
@@ -464,7 +501,8 @@ export class SseListener {
    * 以及新请求出现时，确保 QQ 能及时看到 plan md。
    */
   async notifyPendingPlans(sid) {
-    if (this.config?.output_level === 'silence') return
+    const profile = this.channelProfile(sid)
+    if (profile.outputLevel === 'silence') return
     try {
       const messages = await ops.fetchMessages(this.client, sid, 50)
       if (!messages.length) return
@@ -472,9 +510,9 @@ export class SseListener {
       const planItems = classifyHapiMessages(messages, {
         includeUsers: false,
         reasoningMaxChars: this.config?.reasoning_max_chars,
-        collapseActivity: this.config?.output_level === 'collapsed',
+        collapseActivity: profile.outputLevel === 'collapsed',
       })
-        .filter(item => this.shouldOutputClassifiedMessage(item))
+        .filter(item => this.shouldOutputClassifiedMessage(item, profile))
         .filter(item => item.kind === 'plan' && (item.seq || 0) > lastPlanSeq)
       if (!planItems.length) return
       await this.outputPlanItems(sid, planItems)
@@ -566,15 +604,37 @@ export class SseListener {
   }
 
   /**
+   * 会话所属窗口的通道策略。没有注入解析器（或在解析时抛错）就退回全局配置，
+   * 与 OneBot 窗口的行为一致。
+   * @param {string} [sid]
+   */
+  channelProfile(sid) {
+    if (typeof this.profileFor === 'function') {
+      try {
+        const profile = this.profileFor(sid)
+        if (profile) return profile
+      } catch (err) {
+        logger.warn(`[hapi-connector] 解析通道策略失败: ${err?.message || err}`)
+      }
+    }
+    return globalProfile(this.config || {})
+  }
+
+  /** 当前通道是否静默（不推任何会话消息） */
+  isSilent(sid) {
+    return this.channelProfile(sid).outputLevel === 'silence'
+  }
+
+  /**
    * thinking 显示规则：
    * - collapsed / summary：不显示
    * - simple / detail：显示（需 reasoning_max_chars > 0）
    * - reasoning_max_chars === 0：所有级别都不显示 thinking
    * simple/collapsed/summary 另隐藏 ready、token-count；detail 保留系统事件。
    */
-  shouldOutputClassifiedMessage(item) {
+  shouldOutputClassifiedMessage(item, profile = null) {
     if (!item) return false
-    const outputLevel = this.config?.output_level || 'simple'
+    const outputLevel = (profile || this.channelProfile()).outputLevel || 'simple'
     const maxReasoning = Number(this.config?.reasoning_max_chars)
     const showThinking = Number.isFinite(maxReasoning) && maxReasoning > 0
 
@@ -676,7 +736,7 @@ export class SseListener {
 
     if (state.count >= max) {
       logger.mark(`[hapi-connector] 自动 continue 重试已达上限 ${max}: ${sid.slice(0, 8)}`)
-      if (this.config?.output_level !== 'silence') {
+      if (!this.isSilent(sid)) {
         this.notify(`自动 continue 重试已达上限 ${max} 次，已停止重试。\n命中报错：${matched}\n${sessionLabel(sid, this.sessions)}`, sid).catch(() => { })
       }
       return
@@ -685,7 +745,7 @@ export class SseListener {
     const attempt = state.count + 1
     const delayMin = Math.round(retryDelayMs(this.config) / 60000)
     logger.mark(`[hapi-connector] 命中报错字符串「${matched}」，将在 ${delayMin} 分钟后自动发送 continue (${attempt}/${max}): ${sid.slice(0, 8)}`)
-    if (this.config?.output_level !== 'silence') {
+    if (!this.isSilent(sid)) {
       const prefix = state.resetCountdown
         ? '再次触发 HAPI 报错，重试倒计时已重置'
         : '检测到 HAPI 报错'
@@ -714,7 +774,7 @@ export class SseListener {
     if (await this.sessionRecoveredSince(sid, errorSeq)) {
       logger.mark(`[hapi-connector] 待发送 continue 前发现会话已恢复，取消本次重试: ${sid.slice(0, 8)}`)
       this.resetAutoRetry(sid)
-      if (this.config?.output_level !== 'silence') {
+      if (!this.isSilent(sid)) {
         await this.notify(`HAPI 报错后会话已自行恢复，已取消本次自动 continue 重试。\n${sessionLabel(sid, this.sessions)}`, sid).catch(() => { })
       }
       return
@@ -759,11 +819,11 @@ export class SseListener {
         this.watchAutoContinue(sid)
       } else {
         logger.warn(`[hapi-connector] 自动发送 continue 失败: ${message}`)
-        if (this.config?.output_level !== 'silence') await this.notify(`自动发送 continue 失败：${message}`, sid)
+        if (!this.isSilent(sid)) await this.notify(`自动发送 continue 失败：${message}`, sid)
       }
     } catch (err) {
       logger.warn(`[hapi-connector] 自动发送 continue 异常: ${err.message || err}`)
-      if (this.config?.output_level !== 'silence') await this.notify(`自动发送 continue 异常：${err.message || err}`, sid)
+      if (!this.isSilent(sid)) await this.notify(`自动发送 continue 异常：${err.message || err}`, sid)
     }
   }
 

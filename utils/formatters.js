@@ -490,6 +490,22 @@ export function formatSize(size) {
   return `${size}B`
 }
 
+/**
+ * 官方机器人子命令清单。#hapi help 与 #hapi qqbot help 共用一份，
+ * 改指令时只改这里，避免两处帮助对不上。
+ */
+export const QQBOT_HELP_LINES = [
+  '#hapi qqbot login                       扫码添加机器人',
+  '#hapi qqbot login <AppID> <AppSecret>   手动填写凭证',
+  '#hapi qqbot list                        列出全部机器人及状态',
+  '#hapi qqbot status <AppID>              查看连接状态',
+  '#hapi qqbot logout <AppID>              退出登录（保留凭证）',
+  '#hapi qqbot remove <AppID>              删除机器人（抹掉凭证）',
+  '#hapi qqbot markdown <AppID> on|off     切换文本发送格式',
+]
+
+export const QQBOT_HELP = ['QQ 官方机器人：', ...QQBOT_HELP_LINES].join('\n')
+
 export function helpText(topic = '') {
   return helpNodes(topic).join('\n\n')
 }
@@ -570,6 +586,7 @@ export function helpNodes(topic = '', config = {}) {
       '#hapi更新              更新插件',
       '#hapi强制更新          强制更新插件',
     ].join('\n'),
+    ['QQ 官方机器人', '', ...QQBOT_HELP_LINES].join('\n'),
     createExampleNode(),
   ]
 }

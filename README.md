@@ -12,26 +12,43 @@ _把 Claude Code / Codex / Cursor / Grok / Kimi / OpenCode / Pi 会话搬进聊�
 
 ## 这是什么
 
-`hapi_connector-plugin` 是云崽 / TRSS-Yunzai 版的 HAPI 遥控器。它连接 [HAPI](https://github.com/tiann/hapi) 后端，通过 QQ/微信等聊天窗口远程查看、切换、创建和管理 AI 编码会话，并接收 SSE 实时通知。
+`hapi_connector-plugin` 是云崽 / TRSS-Yunzai 版的 HAPI 遥控器：连接 [HAPI](https://github.com/tiann/hapi) 后端，在聊天窗口里查看、切换、创建、管理 AI 编码会话，并接收 SSE 实时通知。
 
-适合这些场景：
-
-- 离开电脑后继续推进 Claude Code / Codex 任务
-- 在手机上审批工具权限请求
-- 多个项目、多种代理并行运行时按聊天窗口隔离通知
-- 从聊天窗口查看远端目录、搜索文件、下载/上传小文件
+离开电脑后继续推进任务、在手机上审批工具权限、按聊天窗口隔离多个项目的通知——都在聊天里完成。
 
 ### 预览
 
 <img decoding="async" width="150" align=right src="https://github.com/user-attachments/assets/130bf2fd-e116-4b89-aaa4-884dad5bf21c">
 
-- 示例中连接的是 Claude Code
-- 支持 Markdown 图片回复
-
 <img width="230" alt="image" src="https://github.com/user-attachments/assets/f01e4ca9-176d-4812-8177-3d63623d13d7" />
 
 <img width="230" alt="image" src="https://github.com/user-attachments/assets/8dfaf13d-d1a4-40c9-9d2b-91abaa071f1c" />
 
+## QQ 官方机器人
+
+插件内置 QQ 开放平台官方机器人适配器。官方 bot 是云崽里与 OneBot 账号并列的一等账号，所有插件都能直接用它收发消息。
+
+```text
+#hapi qqbot login                       扫码添加机器人
+#hapi qqbot login <AppID> <AppSecret>   手动填写凭证
+#hapi qqbot list                        列出全部机器人及状态
+#hapi qqbot status <AppID>              查看连接状态
+#hapi qqbot logout <AppID>              退出登录（保留凭证）
+#hapi qqbot remove <AppID>              删除机器人（抹掉凭证）
+#hapi qqbot markdown <AppID> on|off     切换文本发送格式
+```
+
+> [!IMPORTANT]
+> `#hapi qqbot` 全部子命令仅云崽主人可用。
+
+账号与通道设置在锅巴的「官方机器人」标签页里也能改：
+
+| 区块 | 内容 |
+| --- | --- |
+| 账号 | 备注、AppID（只读）、在线状态（只读）、启用开关 |
+| 通道设置 | 推送级别、输出方式、摘要固定走 Markdown |
+
+AppSecret 不展示也不提交；新增机器人只能靠 `#hapi qqbot login`。能力边界与限制见 [docs/qqbot-adapter.md](docs/qqbot-adapter.md)。
 
 ## 安装插件
 
@@ -78,21 +95,18 @@ hapi_endpoint: "http://127.0.0.1:3006"
 access_token: "your-token"
 ```
 
-连接配置保存后会清理旧 JWT 并自动重启 SSE，无需重启云崽。
-
-## 必备指令
-
-所有 HAPI 指令同时支持 `/hapi` 和 `#hapi`：
-
-```text
-#hapi help
-#hapi帮助
-```
+## 指令
 
 > [!IMPORTANT]
-> 所有 `#hapi` 指令仅对云崽主人权限生效，普通用户无法使用任何 HAPI 指令
+> 所有 `#hapi` 指令仅对云崽主人权限生效；`/hapi` 与 `#hapi` 等价。
 
-## 常用命令
+### 必备
+
+```text
+#hapi help                  查看帮助
+#hapi帮助                   同上
+#hapi更新                   更新插件
+```
 
 ### 会话查看
 
@@ -115,9 +129,6 @@ access_token: "your-token"
 > {3} 上传附件5份 [内容]     等待 5 个附件后发送到第 3 个 session
 ```
 
-> [!TIP]
-> 快捷发送、`#hapi to` 支持同一条消息附带图片/视频/文件等附件，插件会先上传附件到 HAPI，再把附件引用随消息发送。`> 上传附件3张` 会进入等待模式，按提示继续发送附件即可。
-
 ### Session 管理
 
 ```text
@@ -134,14 +145,11 @@ access_token: "your-token"
 #hapi clean [路径前缀]                          删除已关闭会话（交互选择）
 ```
 
-> [!TIP]
-> `#hapi create` 不带完整参数时会进入分步向导模式 _（新手推荐）_
-
-#### `create` 的完整格式：
+`#hapi create` 不带完整参数时进入分步向导 _（新手推荐）_。完整格式：
 
 ```text
 #hapi create <machineId> <目录> <claude|codex|cursor|grok|kimi|opencode|pi> [simple|worktree] [模型] [推理强度] [权限模式] [yolo]
-示例：
+
 #hapi create my-pc E:/myrepo/project codex simple yolo high
 #hapi create my-pc E:/myrepo/project claude simple opus high bypassPermissions
 ```
@@ -159,8 +167,7 @@ access_token: "your-token"
 戳一戳机器人              批准全部普通请求
 ```
 
-> [!TIP]
-> `#hapi answer` 只用于回答 HAPI agent 发起的 question 请求，不会把内容当作普通聊天消息发送。普通对话请使用 `#hapi to <序号> <内容>` 或快捷发送。
+`#hapi answer` 只回答 agent 发起的 question 请求；普通对话用 `#hapi to` 或快捷发送。
 
 ### 文件操作
 
@@ -187,16 +194,6 @@ access_token: "your-token"
 #hapi bind reset          清除当前窗口绑定
 #hapi bind clean          清除默认通知窗口
 ```
-
-### 插件维护
-
-```text
-#hapi更新
-```
-
-## TODO
-
-- [x] 若适配器不支持发送文件，图片仍会优先以图片消息发送，普通文件会回退到 `segment.file`。
 
 ## 致谢
 

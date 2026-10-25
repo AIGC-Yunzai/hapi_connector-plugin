@@ -79,6 +79,20 @@ async function getQuotedMessageContext(e) {
 }
 
 async function resolveQuotedMessageContext(e) {
+  // 官方 QQ 机器人不提供单条拉取：被引正文是适配器解析 msg_elements 时
+  // 直接挂在 reply 段上的，这里先认它，省掉注定失败的 getReply / getChatHistory。
+  const inlineReply = Array.isArray(e?.message)
+    ? e.message.find(item => item?.type === 'reply' && String(item.text || '').trim())
+    : null
+  if (inlineReply) {
+    return {
+      message: [{ type: 'text', text: String(inlineReply.text) }],
+      senderNickname: String(inlineReply.name || ''),
+      senderUserId: '',
+      messageId: e.reply_id || '',
+    }
+  }
+
   try {
     if (e?.reply_id && typeof e.getReply === 'function') {
       const reply = await e.getReply(e.reply_id)
