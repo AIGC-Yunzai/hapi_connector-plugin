@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import { QQBotOfficialAdapter } from '../adapter/QQBotOfficial.js'
 import { PassiveReplyTracker } from '../adapter/qqbot/passive.js'
+import { RefIndex } from '../adapter/qqbot/refIndex.js'
 import { QQBotApiError } from '../adapter/qqbot/api.js'
 
 // 适配器与云崽其它模块一样用全局 logger，纯 node 环境补一个最小实现
@@ -15,12 +16,12 @@ function makeEntry({ markdown = true, handler } = {}) {
     async sendC2C(openid, payload) {
       sent.push({ scope: 'c2c', target: openid, payload })
       if (handler) return handler('c2c', payload, sent)
-      return { id: `msg-${sent.length}`, timestamp: Date.now() }
+      return { id: `msg-${sent.length}`, timestamp: Date.now(), ext_info: { ref_idx: `REFIDX_out-${sent.length}` } }
     },
     async sendGroup(groupId, payload) {
       sent.push({ scope: 'group', target: groupId, payload })
       if (handler) return handler('group', payload, sent)
-      return { id: `msg-${sent.length}`, timestamp: Date.now() }
+      return { id: `msg-${sent.length}`, timestamp: Date.now(), ext_info: { ref_idx: `REFIDX_out-${sent.length}` } }
     },
     async sendGuildChannel(channelId, payload) {
       sent.push({ scope: 'channel', target: channelId, payload })
@@ -40,6 +41,7 @@ function makeEntry({ markdown = true, handler } = {}) {
     account: { appid: '102030405', markdown },
     api,
     tracker: new PassiveReplyTracker(),
+    refIndex: new RefIndex(),
     dedup: new Map(),
     dmTargets: new Map(),
     ready: true,
@@ -399,4 +401,68 @@ test('频道发视频直接报错，不静默丢消息', async () => {
       }),
     /只能发图片/,
   )
+})
+
+test('引用机器人自己发过的消息：用发出时的 id 就能引用到', async () => {
+  const { entry, sent } = makeEntry()
+  const chat = { scope: 'c2c', id: 'U1' }
+
+  const first = await adapter.sendTo(entry, chat, '第一张图')
+  assert.equal(first.refIdx, 'REFIDX_out-1')
+
+  await adapter.sendTo(entry, chat, [
+    { type: 'reply', id: first.message_id },
+    { type: 'text', text: '就是上面这条' },
+  ])
+
+  assert.deepEqual(sent[1].payload.message_reference, { message_id: 'REFIDX_out-1' })
+})
+
+test('引用未知的 ROBOT1.0 id 时仍回退到本条被动消息', async () => {
+  const { entry, sent } = makeEntry()
+  const chat = { scope: 'group', id: 'G1' }
+  entry.tracker.remember(chat, { messageId: 'IN-1', refIdx: 'REFIDX_self' })
+
+  await adapter.sendTo(entry, chat, [
+    { type: 'reply', id: 'ROBOT1.0_unknown' },
+    { type: 'text', text: '回一句' },
+  ])
+
+  assert.deepEqual(sent[0].payload.message_reference, { message_id: 'REFIDX_self' })
+})
+
+test('发送响应没有 ext_info 时不入索引，也不影响发送', async () => {
+  // 频道与频道私信就是这样：响应里没有 ext_info
+  const { entry, sent } = makeEntry({ handler: () => ({ id: 'msg-no-ref', timestamp: 0 }) })
+  const chat = { scope: 'group', id: 'G1' }
+
+  const result = await adapter.sendTo(entry, chat, '纯文本')
+  assert.equal(result.refIdx, '')
+  assert.equal(entry.refIndex.size, 0)
+
+  await adapter.sendTo(entry, chat, [
+    { type: 'reply', id: result.message_id },
+    { type: 'text', text: '再一句' },
+  ])
+  // 索引里没有，也没有被动窗口，于是不带引用
+  assert.equal(sent[1].payload.message_reference, undefined)
+})
+
+test('频道用消息 id 直接引用，不要求 REFIDX 形态', async () => {
+  const { entry, sent } = makeEntry()
+  await adapter.sendTo(entry, { scope: 'channel', id: 'C-1', guildId: 'GU-1' }, [
+    { type: 'reply', id: 'CH-MSG-1' },
+    { type: 'text', text: '回频道那条' },
+  ])
+
+  const channel = sent.find(item => item.scope === 'channel')
+  assert.deepEqual(channel.payload.message_reference, { message_id: 'CH-MSG-1' })
+})
+
+test('频道里没给引用目标时不硬塞 message_reference', async () => {
+  const { entry, sent } = makeEntry()
+  await adapter.sendTo(entry, { scope: 'channel', id: 'C-1', guildId: 'GU-1' }, '普通消息')
+
+  const channel = sent.find(item => item.scope === 'channel')
+  assert.equal(channel.payload.message_reference, undefined)
 })

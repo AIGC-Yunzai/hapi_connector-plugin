@@ -45,7 +45,7 @@ _把 Claude Code / Codex / Cursor / Grok / Kimi / OpenCode / Pi 会话搬进聊�
 
 | 区块 | 内容 |
 | --- | --- |
-| 账号 | 备注、AppID（只读）、在线状态（只读）、启用开关 |
+| 账号 | 备注、AppID（只读）、在线状态（只读）、原生 Markdown 开关、启用开关 |
 | 通道设置 | 推送级别、输出方式、摘要固定走 Markdown |
 
 AppSecret 不展示也不提交；新增机器人只能靠 `#hapi qqbot login`。能力边界与限制见 [docs/qqbot-adapter.md](docs/qqbot-adapter.md)。

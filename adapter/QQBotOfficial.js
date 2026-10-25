@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import { QQBotApi, QQBotApiError } from './qqbot/api.js'
 import { QQBotGateway } from './qqbot/gateway.js'
 import { PassiveReplyTracker } from './qqbot/passive.js'
+import { RefIndex } from './qqbot/refIndex.js'
 import { accountStore } from './qqbot/store.js'
 import {
   segmentsToChunks,
@@ -108,6 +109,7 @@ export class QQBotOfficialAdapter {
       api,
       gateway,
       tracker: new PassiveReplyTracker(),
+      refIndex: new RefIndex(),
       dedup: new Map(),
       // 频道私信按 guild 维度发送，但入站只有作者 user_id，这里记一笔 user → guild 的对应
       dmTargets: new Map(),
@@ -328,9 +330,30 @@ export class QQBotOfficialAdapter {
     for (const chunk of chunks) {
       last = await this.#sendChunk(entry, chat, chunk)
     }
-    // Yunzai 侧统一按 { message_id } 取返回值，平台原始字段是 id
-    if (last && typeof last === 'object') return { ...last, message_id: last.id ?? last.message_id ?? '' }
+    // Yunzai 侧统一按 { message_id } 取返回值，平台原始字段是 id。
+    // refIdx 是这条消息的引用索引，拿到它就能直接引用自己发过的这条。
+    if (last && typeof last === 'object') {
+      return {
+        ...last,
+        message_id: last.id ?? last.message_id ?? '',
+        refIdx: last.ext_info?.ref_idx || '',
+      }
+    }
     return last || { message_id: '' }
+  }
+
+  /**
+   * 出站引用目标。
+   * - 显式给的 `REFIDX_` 直接用；
+   * - 频道接口的引用参数就是被引消息的 id 本身，没有 REFIDX 这套；
+   * - 其余形态先查发送索引（对应「引用机器人自己发过的消息」）；
+   * - 都没有就回退到本条被动消息，保住 `e.reply(msg, true)` 那条路径。
+   */
+  #resolveRefIdx(entry, chat, replyId, passive) {
+    const explicit = String(replyId || '')
+    if (chat.scope === 'channel') return explicit || passive?.refIdx || ''
+    if (explicit.startsWith('REFIDX_')) return explicit
+    return (explicit && entry.refIndex?.get(explicit)) || passive?.refIdx || ''
   }
 
   async #sendChunk(entry, chat, chunk) {
@@ -338,8 +361,7 @@ export class QQBotOfficialAdapter {
     const messageId = passive?.messageId || ''
     const msgSeq = passive?.msgSeq
     const allowSeq = chat.scope !== 'channel'
-    // 引用目标优先取调用方给的 REFIDX_，否则回退到本条消息自身（由 tracker 记录）
-    const refIdx = chunk.replyId?.startsWith('REFIDX_') ? chunk.replyId : passive?.refIdx || ''
+    const refIdx = this.#resolveRefIdx(entry, chat, chunk.replyId, passive)
 
     if (chunk.media) {
       // 频道与频道私信没有 v2 的上传/msg_type=7 通道，走 guild 接口的内联图片字段
@@ -425,8 +447,18 @@ export class QQBotOfficialAdapter {
     }
   }
 
-  #callSend(entry, chat, payload) {
+  async #callSend(entry, chat, payload) {
     const { api } = entry
+    const result = await this.#dispatchSend(entry, api, chat, payload)
+    // 发送响应里的 ext_info.ref_idx 是这条消息的引用索引，
+    // 记下来才能让「引用机器人自己发过的消息」找得到它。
+    if (result?.id && result?.ext_info?.ref_idx) {
+      entry.refIndex?.remember(result.id, result.ext_info.ref_idx)
+    }
+    return result
+  }
+
+  #dispatchSend(entry, api, chat, payload) {
     if (chat.scope === 'group') return api.sendGroup(chat.id, payload)
     if (chat.scope === 'channel') {
       // 频道走 guild 接口，不认 v2 的 msg_type。频道也不参与被动回复预算，
