@@ -1,6 +1,7 @@
 import Config from './components/Config.js'
 import { qqbotAdapter } from './adapter/QQBotOfficial.js'
 import { accountStore } from './adapter/qqbot/store.js'
+import { QQBOT_HELP_ITEMS } from './utils/formatters.js'
 import { applyQQBotAccountDiff, buildQQBotAccountCards, diffQQBotAccounts } from './utils/qqbotAccounts.js'
 
 /** 只读展示字段：提交时剔除，不落进主配置 */
@@ -71,6 +72,8 @@ export function supportGuoba() {
     helpItem('output', '查看 / 切换 SSE 推送级别', '#hapi output [级别]'),
     helpItem('bind1', '默认通知窗口', '#hapi bind [claude|codex|cursor|grok|kimi|opencode|pi|all]', '设置指定 flavor 或全部默认通知窗口'),
     helpItem('bind2', '默认通知窗口', '#hapi bind status  /  reset  /  clean <all|flavor>', '查看 session 推送路由 / 清除默认通知窗口'),
+    helpDivider('QQ 官方机器人'),
+    ...QQBOT_HELP_ITEMS.map(item => helpItem(item.key, item.title, item.command)),
   ]
 
   return {

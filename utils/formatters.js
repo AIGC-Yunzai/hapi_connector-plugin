@@ -491,18 +491,28 @@ export function formatSize(size) {
 }
 
 /**
- * 官方机器人子命令清单。#hapi help 与 #hapi qqbot help 共用一份，
- * 改指令时只改这里，避免两处帮助对不上。
+ * 官方机器人子命令清单。#hapi qqbot help、锅巴帮助页、README 的指令块共用一份，
+ * 改指令时只改这里，避免几处对不上。
+ *
+ * key 一律带 `qqbot_` 前缀：锅巴帮助页里所有条目的字段名是 `help_<key>`，
+ * 裸 `list` / `status` 会撞上已有的主指令条目。
  */
-export const QQBOT_HELP_LINES = [
-  '#hapi qqbot login                       扫码添加机器人',
-  '#hapi qqbot login <AppID> <AppSecret>   手动填写凭证',
-  '#hapi qqbot list                        列出全部机器人及状态',
-  '#hapi qqbot status <AppID>              查看连接状态',
-  '#hapi qqbot logout <AppID>              退出登录（保留凭证）',
-  '#hapi qqbot remove <AppID>              删除机器人（抹掉凭证）',
-  '#hapi qqbot markdown <AppID> on|off     切换文本发送格式',
+export const QQBOT_HELP_ITEMS = [
+  { key: 'qqbot_login', command: '#hapi qqbot login', title: '扫码添加机器人' },
+  { key: 'qqbot_login_manual', command: '#hapi qqbot login <AppID> <AppSecret>', title: '手动填写凭证' },
+  { key: 'qqbot_list', command: '#hapi qqbot list', title: '列出全部机器人及状态' },
+  { key: 'qqbot_status', command: '#hapi qqbot status <AppID>', title: '查看连接状态' },
+  { key: 'qqbot_logout', command: '#hapi qqbot logout <AppID>', title: '退出登录（保留凭证）' },
+  { key: 'qqbot_remove', command: '#hapi qqbot remove <AppID>', title: '删除机器人（抹掉凭证）' },
+  { key: 'qqbot_markdown', command: '#hapi qqbot markdown <AppID> on|off', title: '切换文本发送格式' },
 ]
+
+/** 命令列固定 40 字符，与 README 里那段等宽排版一致 */
+export const QQBOT_HELP_COMMAND_WIDTH = 40
+
+export const QQBOT_HELP_LINES = QQBOT_HELP_ITEMS.map(
+  ({ command, title }) => `${command.padEnd(QQBOT_HELP_COMMAND_WIDTH)}${title}`,
+)
 
 export const QQBOT_HELP = ['QQ 官方机器人：', ...QQBOT_HELP_LINES].join('\n')
 
