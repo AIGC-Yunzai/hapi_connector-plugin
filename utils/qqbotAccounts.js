@@ -14,6 +14,10 @@ function enabledOf(account) {
   return account?.enabled !== false
 }
 
+function markdownOf(account) {
+  return account?.markdown !== false
+}
+
 function appidOf(value) {
   return String(value ?? '').trim()
 }
@@ -23,7 +27,7 @@ function appidOf(value) {
  *
  * @param {Array} accounts accountStore.list() 的结果
  * @param {(appid: string) => { online?: boolean, ready?: boolean }} [statusOf]
- * @returns {Array<{ appid: string, remark: string, enabled: boolean, status: string }>}
+ * @returns {Array<{ appid: string, remark: string, enabled: boolean, markdown: boolean, status: string }>}
  */
 export function buildQQBotAccountCards(accounts, statusOf = () => ({})) {
   return (Array.isArray(accounts) ? accounts : []).map(account => {
@@ -32,6 +36,7 @@ export function buildQQBotAccountCards(accounts, statusOf = () => ({})) {
       appid,
       remark: String(account?.remark || ''),
       enabled: enabledOf(account),
+      markdown: markdownOf(account),
       status: accountStatusLabel(account, statusOf(appid) || {}),
     }
   })
@@ -58,7 +63,7 @@ export function accountStatusLabel(account, status = {}) {
  * @param {Array} submitted 锅巴提交的卡片数组
  * @returns {{
  *   remove: string[],
- *   update: Array<{ appid: string, remark: string, enabled: boolean, reconnect: boolean }>,
+ *   update: Array<{ appid: string, remark: string, enabled: boolean, markdown: boolean, reconnect: boolean }>,
  *   ignored: string[],
  * }}
  */
@@ -93,13 +98,17 @@ export function diffQQBotAccounts(current, submitted) {
     }
     const remark = card.remark === undefined ? String(account.remark || '') : String(card.remark ?? '')
     const enabled = card.enabled === undefined ? enabledOf(account) : Boolean(card.enabled)
+    const markdown = card.markdown !== false
     const remarkChanged = remark !== String(account.remark || '')
     const enabledChanged = enabled !== enabledOf(account)
-    if (!remarkChanged && !enabledChanged) continue
+    const markdownChanged = markdown !== markdownOf(account)
+    if (!remarkChanged && !enabledChanged && !markdownChanged) continue
     update.push({
       appid,
       remark,
       enabled,
+      markdown,
+      // 发送格式不用重连，只有启停才动连接
       reconnect: enabledChanged,
     })
   }
@@ -135,7 +144,11 @@ export async function applyQQBotAccountDiff(diff, adapter) {
 
   for (const item of diff?.update || []) {
     try {
-      adapter.updateAccount(item.appid, { remark: item.remark, enabled: item.enabled })
+      adapter.updateAccount(item.appid, {
+        remark: item.remark,
+        enabled: item.enabled,
+        markdown: item.markdown,
+      })
       // 启停要立刻生效：关就断开，开就重连
       if (item.reconnect) {
         if (item.enabled) await adapter.login(item.appid)

@@ -376,6 +376,12 @@ export function supportGuoba() {
                 bottomHelpMessage: '只读；在线状态以网关连接为准',
               },
               {
+                field: 'markdown',
+                label: '原生 Markdown',
+                component: 'Switch',
+                bottomHelpMessage: '关闭后普通文本以纯文本发送；segment.markdown 仍按 markdown 发送',
+              },
+              {
                 field: 'enabled',
                 label: '启用',
                 component: 'Switch',

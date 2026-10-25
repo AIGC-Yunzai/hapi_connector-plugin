@@ -20,16 +20,26 @@ function fakeAdapter(overrides = {}) {
   }
 }
 
-test('cards expose appid, remark, enabled and a status label only', () => {
+test('cards expose appid, remark, enabled, markdown and a status label only', () => {
   const status = { 1001: { ready: true, online: true }, 1002: { online: true } }
   const cards = buildQQBotAccountCards(CURRENT, appid => status[appid] || {})
 
   assert.deepEqual(cards, [
-    { appid: '1001', remark: '工作', enabled: true, status: '在线' },
-    { appid: '1002', remark: '', enabled: true, status: '连接中' },
-    { appid: '1003', remark: '旧机器', enabled: false, status: '已停用' },
+    { appid: '1001', remark: '工作', enabled: true, markdown: true, status: '在线' },
+    { appid: '1002', remark: '', enabled: true, markdown: true, status: '连接中' },
+    { appid: '1003', remark: '旧机器', enabled: false, markdown: true, status: '已停用' },
   ])
   for (const card of cards) assert.equal('secret' in card, false)
+})
+
+test('a card carries the stored markdown switch, and only false turns it off', () => {
+  const cards = buildQQBotAccountCards([
+    { appid: '1001', secret: 's', markdown: false },
+    { appid: '1002', secret: 's' },
+  ])
+
+  assert.equal(cards[0].markdown, false)
+  assert.equal(cards[1].markdown, true)
 })
 
 test('the diff deletes, updates and ignores exactly what changed', () => {
@@ -42,7 +52,9 @@ test('the diff deletes, updates and ignores exactly what changed', () => {
   const diff = diffQQBotAccounts(CURRENT, submitted)
 
   assert.deepEqual(diff.remove, ['1003'])
-  assert.deepEqual(diff.update, [{ appid: '1002', remark: '生活', enabled: false, reconnect: true }])
+  assert.deepEqual(diff.update, [
+    { appid: '1002', remark: '生活', enabled: false, markdown: true, reconnect: true },
+  ])
   assert.deepEqual(diff.ignored, ['9999'])
   // 没改过的不写
   assert.equal(diff.update.some(item => item.appid === '1001'), false)
@@ -53,7 +65,27 @@ test('the diff deletes, updates and ignores exactly what changed', () => {
 test('a remark-only change does not trigger a reconnect', () => {
   const diff = diffQQBotAccounts(CURRENT, [{ appid: '1002', remark: '改个名', enabled: true }])
 
-  assert.deepEqual(diff.update, [{ appid: '1002', remark: '改个名', enabled: true, reconnect: false }])
+  assert.deepEqual(diff.update, [
+    { appid: '1002', remark: '改个名', enabled: true, markdown: true, reconnect: false },
+  ])
+})
+
+test('switching markdown alone updates the account without a reconnect', async () => {
+  const diff = diffQQBotAccounts(CURRENT, [
+    { appid: '1001', remark: '工作', enabled: true, markdown: false },
+    { appid: '1002', remark: '', enabled: true, markdown: true },
+    { appid: '1003', remark: '旧机器', enabled: false, markdown: true },
+  ])
+
+  assert.deepEqual(diff.update, [
+    { appid: '1001', remark: '工作', enabled: true, markdown: false, reconnect: false },
+  ])
+
+  const adapter = fakeAdapter()
+  await applyQQBotAccountDiff(diff, adapter)
+  assert.deepEqual(adapter.calls, [
+    ['updateAccount', '1001', { remark: '工作', enabled: true, markdown: false }],
+  ])
 })
 
 test('missing enabled keeps the stored value instead of disabling everything', () => {
@@ -83,22 +115,22 @@ test('disabling an account disconnects it; enabling reconnects it', async () => 
   const applied = await applyQQBotAccountDiff({
     remove: [],
     update: [
-      { appid: '1002', remark: '生活', enabled: false, reconnect: true },
-      { appid: '1003', remark: '', enabled: true, reconnect: true },
+      { appid: '1002', remark: '生活', enabled: false, markdown: true, reconnect: true },
+      { appid: '1003', remark: '', enabled: true, markdown: true, reconnect: true },
     ],
   }, adapter)
 
   assert.deepEqual(applied.updated, ['1002', '1003'])
   assert.deepEqual(adapter.calls, [
-    ['updateAccount', '1002', { remark: '生活', enabled: false }],
+    ['updateAccount', '1002', { remark: '生活', enabled: false, markdown: true }],
     ['logout', '1002'],
-    ['updateAccount', '1003', { remark: '', enabled: true }],
+    ['updateAccount', '1003', { remark: '', enabled: true, markdown: true }],
     ['login', '1003'],
   ])
-  // 只提交备注与启用状态，secret 永远不经过这里
+  // 只提交备注、启用状态与发送格式，secret 永远不经过这里
   for (const call of adapter.calls) {
     if (call[0] !== 'updateAccount') continue
-    assert.deepEqual(Object.keys(call[2]).sort(), ['enabled', 'remark'])
+    assert.deepEqual(Object.keys(call[2]).sort(), ['enabled', 'markdown', 'remark'])
   }
 })
 
@@ -109,8 +141,8 @@ test('a failed reconnect is reported without blocking the rest', async () => {
   const applied = await applyQQBotAccountDiff({
     remove: ['1001'],
     update: [
-      { appid: '1002', remark: '', enabled: true, reconnect: true },
-      { appid: '1003', remark: '旧机器', enabled: false, reconnect: false },
+      { appid: '1002', remark: '', enabled: true, markdown: true, reconnect: true },
+      { appid: '1003', remark: '旧机器', enabled: false, markdown: false, reconnect: false },
     ],
   }, adapter)
 
