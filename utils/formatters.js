@@ -495,7 +495,7 @@ export function formatSize(size) {
  * 改指令时只改这里，避免几处对不上。
  *
  * key 一律带 `qqbot_` 前缀：锅巴帮助页里所有条目的字段名是 `help_<key>`，
- * 裸 `list` / `status` 会撞上已有的主指令条目。
+ * 裸 `list` / `login` 会撞上已有的主指令条目。
  */
 export const QQBOT_HELP_ITEMS = [
   { key: 'qqbot_login', command: '#hapi qqbot login', title: '扫码添加机器人' },

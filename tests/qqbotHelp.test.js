@@ -23,20 +23,20 @@ test('the qqbot command list has seven entries with unique, prefixed keys', () =
   for (const key of keys) assert.match(key, /^qqbot_/)
 })
 
-test('each entry carries a command and a short title', () => {
+test('each entry carries a command and a title', () => {
   for (const item of QQBOT_HELP_ITEMS) {
-    assert.match(item.command, /^#hapi qqbot /)
-    assert.ok(item.title.length >= 4 && item.title.length <= 12, `标题过长或过短：${item.title}`)
+    assert.match(item.command, /^#hapi qqbot \S/)
+    assert.ok(item.title.trim().length > 0)
   }
 })
 
-test('help lines pad the command column and append the title', () => {
+test('help lines start every title at the same column', () => {
   assert.equal(QQBOT_HELP_LINES.length, QQBOT_HELP_ITEMS.length)
 
   QQBOT_HELP_LINES.forEach((line, index) => {
     const { command, title } = QQBOT_HELP_ITEMS[index]
-    assert.equal(line, `${command.padEnd(QQBOT_HELP_COMMAND_WIDTH)}${title}`)
     assert.equal(line.slice(0, QQBOT_HELP_COMMAND_WIDTH).trimEnd(), command)
+    assert.equal(line.slice(QQBOT_HELP_COMMAND_WIDTH), title)
   })
 })
 

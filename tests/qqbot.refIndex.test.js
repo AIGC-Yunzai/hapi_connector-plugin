@@ -32,7 +32,7 @@ test('the oldest entry is evicted once the limit is reached', () => {
   assert.equal(index.get('c'), 'REFIDX_c')
 })
 
-test('re-remembering an id makes it the newest, so it survives eviction', () => {
+test('re-remembering an id keeps its original position in the queue', () => {
   const index = new RefIndex({ limit: 2 })
 
   index.remember('a', 'REFIDX_a1')
@@ -40,7 +40,8 @@ test('re-remembering an id makes it the newest, so it survives eviction', () => 
   index.remember('a', 'REFIDX_a2')
   index.remember('c', 'REFIDX_c')
 
-  assert.equal(index.get('a'), 'REFIDX_a2')
-  assert.equal(index.get('b'), '')
+  assert.equal(index.size, 2)
+  assert.equal(index.get('a'), '')
+  assert.equal(index.get('b'), 'REFIDX_b')
   assert.equal(index.get('c'), 'REFIDX_c')
 })

@@ -71,7 +71,7 @@
 | 收到引用（`message_type=103`） | 被引正文从 `msg_elements[0].content` 取，作者昵称从 `msg_elements[0].author` 取，索引优先用 `message_scene.ext` 的 `ref_msg_idx`，其次元素自身的 `msg_idx`。三者一起塞进 `reply` 段（云崽的 reply 段没有昵称字段，这里额外挂 `name`）。 |
 | 插件读引用 | `e.reply_id` 是被引消息的 `REFIDX`；`e.getReply()` / `getChatHistory()` 官方不提供，`extractQuotedText` 直接认 reply 段里的内联正文，把 `> ##### 昵称：\n> ---\n> 正文` 拼进提示词。 |
 | 发引用 | `segment.reply('REFIDX_...')` 直接生效；`e.reply(msg, true)`（云崽的「引用本条」）也能生效——`replyId` 是 `ROBOT1.0_` 形态时落回本条消息的 `msg_idx`。 |
-| 引用机器人自己发过的消息 | 发送成功时把响应里的 `id` 与 `ext_info.ref_idx` 记进进程内的发送索引（上限 500 条，先进先出），之后 `segment.reply(<那条消息的 message_id>)` 就能引用上去。`sendTo` 的返回值也带 `refIdx`，调用方可直接拿它当 `REFIDX` 用。索引不落盘，重启后这类引用退化为「引用本条」或「不引用」。 |
+| 引用机器人自己发过的消息 | 发送成功时把响应里的 `id` 与 `ext_info.ref_idx` 记进进程内的发送索引（上限 500 条，写满后淘汰最早记入的那条），之后 `segment.reply(<那条消息的 message_id>)` 就能引用上去。`sendTo` 的返回值也带 `refIdx`，调用方可直接拿它当 `REFIDX` 用。索引不落盘，重启后这类引用退化为「引用本条」或「不引用」。 |
 | 频道 | 频道接口的引用参数就是被引消息的 `id` 本身（官方 Python SDK 示例为 `Reference(message_id=message.id)` + `post_message(channel_id=…)`），没有 `REFIDX` 这套，因此显式 id 原样使用。频道事件不带 `message_scene`，所以没有「引用本条」的默认值。 |
 | 默认行为 | 被动回复窗口内的每条回复都会带上 `message_reference` 指向触发那条消息，即**自动引用**（不额外限 300 秒，被动窗口本身就是群 5 分钟 / 私聊 60 分钟）。主动推送没有窗口，因此不引用。 |
 

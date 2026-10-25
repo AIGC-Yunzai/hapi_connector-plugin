@@ -53,7 +53,7 @@ test('the diff deletes, updates and ignores exactly what changed', () => {
 
   assert.deepEqual(diff.remove, ['1003'])
   assert.deepEqual(diff.update, [
-    { appid: '1002', remark: '生活', enabled: false, markdown: true, reconnect: true },
+    { appid: '1002', remark: '生活', enabled: false, markdown: true, markdownChanged: false, reconnect: true },
   ])
   assert.deepEqual(diff.ignored, ['9999'])
   // 没改过的不写
@@ -66,7 +66,7 @@ test('a remark-only change does not trigger a reconnect', () => {
   const diff = diffQQBotAccounts(CURRENT, [{ appid: '1002', remark: '改个名', enabled: true }])
 
   assert.deepEqual(diff.update, [
-    { appid: '1002', remark: '改个名', enabled: true, markdown: true, reconnect: false },
+    { appid: '1002', remark: '改个名', enabled: true, markdown: true, markdownChanged: false, reconnect: false },
   ])
 })
 
@@ -78,7 +78,7 @@ test('switching markdown alone updates the account without a reconnect', async (
   ])
 
   assert.deepEqual(diff.update, [
-    { appid: '1001', remark: '工作', enabled: true, markdown: false, reconnect: false },
+    { appid: '1001', remark: '工作', enabled: true, markdown: false, markdownChanged: true, reconnect: false },
   ])
 
   const adapter = fakeAdapter()

@@ -4,7 +4,7 @@
  * 账号表是独立文件（`config/config/qqbot.yaml`），不并入主配置。锅巴只能看到
  * 一份「卡片数组」，所以每次保存都是拿卡片的快照跟账号表求差集：
  * - 只在旧表里 → 删除并断连（AppSecret 一起抹掉）
- * - 两边都有   → 只改备注与启用状态
+ * - 两边都有   → 只改备注、启用状态与发送格式
  * - 只在提交里 → 忽略（新增只能走扫码或命令行）
  *
  * AppSecret 既不出现在卡片里，也不会被这里写回——它只存在于账号表。
@@ -63,7 +63,7 @@ export function accountStatusLabel(account, status = {}) {
  * @param {Array} submitted 锅巴提交的卡片数组
  * @returns {{
  *   remove: string[],
- *   update: Array<{ appid: string, remark: string, enabled: boolean, markdown: boolean, reconnect: boolean }>,
+ *   update: Array<{ appid: string, remark: string, enabled: boolean, markdown: boolean, markdownChanged: boolean, reconnect: boolean }>,
  *   ignored: string[],
  * }}
  */
@@ -108,6 +108,7 @@ export function diffQQBotAccounts(current, submitted) {
       remark,
       enabled,
       markdown,
+      markdownChanged,
       // 发送格式不用重连，只有启停才动连接
       reconnect: enabledChanged,
     })

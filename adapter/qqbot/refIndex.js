@@ -33,8 +33,7 @@ export class RefIndex {
     const value = String(refIdx || '').trim()
     if (!key || !value) return false
 
-    // 同一个 id 再记一次时挪到最新，避免它因为更早的插入顺序被挤掉
-    this.entries.delete(key)
+    // 纯插入序：重复 id 不改它原来的位置，写满时淘汰最早记进来的那条
     this.entries.set(key, value)
     while (this.entries.size > this.limit) {
       const oldest = this.entries.keys().next()
@@ -48,5 +47,3 @@ export class RefIndex {
     return this.entries.get(String(id || '').trim()) || ''
   }
 }
-
-export default RefIndex

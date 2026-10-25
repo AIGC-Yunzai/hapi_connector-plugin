@@ -345,15 +345,15 @@ export class QQBotOfficialAdapter {
   /**
    * 出站引用目标。
    * - 显式给的 `REFIDX_` 直接用；
-   * - 频道接口的引用参数就是被引消息的 id 本身，没有 REFIDX 这套；
+   * - 频道接口的引用参数就是被引消息的 id 本身，没有 REFIDX 这套，也没有被动回复预算；
    * - 其余形态先查发送索引（对应「引用机器人自己发过的消息」）；
    * - 都没有就回退到本条被动消息，保住 `e.reply(msg, true)` 那条路径。
    */
   #resolveRefIdx(entry, chat, replyId, passive) {
     const explicit = String(replyId || '')
-    if (chat.scope === 'channel') return explicit || passive?.refIdx || ''
+    if (chat.scope === 'channel') return explicit
     if (explicit.startsWith('REFIDX_')) return explicit
-    return (explicit && entry.refIndex?.get(explicit)) || passive?.refIdx || ''
+    return (explicit && entry.refIndex.get(explicit)) || passive?.refIdx || ''
   }
 
   async #sendChunk(entry, chat, chunk) {
@@ -448,17 +448,16 @@ export class QQBotOfficialAdapter {
   }
 
   async #callSend(entry, chat, payload) {
-    const { api } = entry
-    const result = await this.#dispatchSend(entry, api, chat, payload)
+    const result = await this.#dispatchSend(entry.api, chat, payload)
     // 发送响应里的 ext_info.ref_idx 是这条消息的引用索引，
     // 记下来才能让「引用机器人自己发过的消息」找得到它。
     if (result?.id && result?.ext_info?.ref_idx) {
-      entry.refIndex?.remember(result.id, result.ext_info.ref_idx)
+      entry.refIndex.remember(result.id, result.ext_info.ref_idx)
     }
     return result
   }
 
-  #dispatchSend(entry, api, chat, payload) {
+  #dispatchSend(api, chat, payload) {
     if (chat.scope === 'group') return api.sendGroup(chat.id, payload)
     if (chat.scope === 'channel') {
       // 频道走 guild 接口，不认 v2 的 msg_type。频道也不参与被动回复预算，
