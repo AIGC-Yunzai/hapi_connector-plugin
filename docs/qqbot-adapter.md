@@ -54,6 +54,8 @@
 
 `group_id` 对群聊是 `group_openid`，对频道是 `guild_id-channel_id`（沿用 OneBot 的 `pickGroup` 约定，`pickGroup('GU-1-C-1')` 能还原出频道）；`self_id` 是 AppID，不是 QQ 号。这些都是字符串，别当数字处理。
 
+**不要预置 `msg`**：云崽的 `loader.dealEvent` 会把 `message` 里的 text 段再拼一遍进 `e.msg`。预置之后 `#设置主人` 会变成 `#设置主人#设置主人`，`^#设置主人$` 这类带锚点的规则全部失配，现象就是「连接正常、入站也有记录，但发什么机器人都没反应」。文本只放在 `message` 段里，`e.msg` 交给云崽自己拼。
+
 发送侧：
 
 - 普通文本默认走 **markdown**（`msg_type=2`）。平台拒绝时按 AstrBot 的顺序降级：先摘掉 `msg_id` 改主动发送，再退回 `content` 纯文本。

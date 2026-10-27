@@ -194,6 +194,26 @@ test('群消息被规范化成 message.group.normal 并剥掉 @ 标记', () => {
   assert.equal(data.bot, entry.bot)
 })
 
+test('派发时不预置 msg，云崽拼接 text 段后指令文本不会翻倍', () => {
+  const emitted = stubBot()
+  const { entry } = makeEntry()
+  entry.bot = {}
+
+  adapter.dispatch(entry, 'GROUP_AT_MESSAGE_CREATE', {
+    id: 'ROBOT1.0_dup',
+    group_openid: 'G-1',
+    content: '#设置主人',
+    author: { member_openid: 'M-1' },
+    attachments: [],
+  })
+
+  const { data } = emitted[0]
+  assert.equal(data.msg, undefined, '预置 msg 会被 dealEvent 再拼一次，指令就再也匹配不上')
+  // 复刻云崽 loader.dealEvent：e.msg = (e.msg || "") + 各 text 段
+  const built = (data.msg || '') + data.message.filter(i => i.type === 'text').map(i => i.text).join('')
+  assert.equal(built, '#设置主人')
+})
+
 test('私聊消息派发成 message.private.normal，用户 id 取 user_openid', () => {
   const emitted = stubBot()
   const { entry } = makeEntry()

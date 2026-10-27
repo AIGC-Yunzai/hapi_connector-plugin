@@ -513,7 +513,7 @@ export class QQBotOfficialAdapter {
     if (!messageId || this.#isDuplicate(entry, messageId)) return
 
     entry.lastInboundAt = Date.now()
-    logger.debug(`[qqbot] ${entry.appid} 入站 ${t} #${messageId}`)
+    logger.info(`[qqbot] ${entry.appid} 入站 ${t} #${messageId}`)
 
     const scope = kind
     const chat = resolveChat(scope, d)
@@ -533,6 +533,11 @@ export class QQBotOfficialAdapter {
       stripMention: scope === 'group',
     })
 
+    // 剥不掉的 @ 标记会让 `^#指令$` 整条失配，且现象是「毫无反应」，先把可疑内容打到日志里
+    if (/^[ \t]*<(?:qqbot-at-user|<@!?)/i.test(plain)) {
+      logger.warn(`[qqbot] ${entry.appid} 入站文本以 @ 标记开头，按 AppID 剥不掉：${plain.slice(0, 60)}`)
+    }
+
     const data = {
       post_type: 'message',
       message_type: scope === 'group' || scope === 'channel' ? 'group' : 'private',
@@ -545,7 +550,6 @@ export class QQBotOfficialAdapter {
       isPrivate: scope === 'c2c' || scope === 'dm',
       message: segments,
       raw_message: plain,
-      msg: plain,
       sender: { user_id: userId, nickname: d.author?.username || '', card: d.author?.username || '' },
       time: Math.floor(Number(d.timestamp || Date.now() / 1000)),
       raw: d,
