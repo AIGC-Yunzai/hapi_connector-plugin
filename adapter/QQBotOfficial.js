@@ -129,6 +129,10 @@ export class QQBotOfficialAdapter {
 
     gateway.on('resumed', () => {
       entry.ready = true
+      entry.lastError = ''
+      // 断线重连走的是 Resume，不会再收到 READY；Bot 对象如果被摘掉过（比如被判 fatal），
+      // 这里补挂回来，否则会「连着但永远不会派发消息」。
+      if (!entry.bot) this.#mountBot(entry)
       logger.info(`[qqbot] ${id} 已恢复会话`)
     })
 
@@ -497,13 +501,19 @@ export class QQBotOfficialAdapter {
   dispatch(entry, t, d) {
     const kind = INBOUND[t]
     if (!kind) return
-    // 还没挂上 Bot 对象时派发出去，插件拿不到 e.reply，会直接炸
-    if (!entry.bot) return
+    // 还没挂上 Bot 对象时派发出去，插件拿不到 e.reply，会直接炸。
+    // READY 只在首次连接来一次，这里按需补挂，避免「连着但永远收不到消息」。
+    if (!entry.bot) this.#mountBot(entry)
+    if (!entry.bot) {
+      logger.warn(`[qqbot] ${entry.appid} 收到 ${t} 但 Bot 对象不可用，已丢弃`)
+      return
+    }
 
     const messageId = String(d?.id || '')
     if (!messageId || this.#isDuplicate(entry, messageId)) return
 
     entry.lastInboundAt = Date.now()
+    logger.debug(`[qqbot] ${entry.appid} 入站 ${t} #${messageId}`)
 
     const scope = kind
     const chat = resolveChat(scope, d)
@@ -515,7 +525,13 @@ export class QQBotOfficialAdapter {
     const userId = resolveUserId(scope, d)
     if (scope === 'dm' && userId) this.#rememberDmTarget(entry, userId, chat.id)
 
-    const { segments, plain } = eventToSegments(d, { botId: entry.appid, stripMention: scope === 'group' })
+    // 群 @ 消息里的 @ 标记用的是机器人的 openid，不一定是 AppID；
+    // 事件里带了 mentions 就以 is_you 的 id 为准，和 AstrBot 的取法一致
+    const mentionId = (d.mentions || []).find(item => item?.is_you)?.id
+    const { segments, plain } = eventToSegments(d, {
+      botId: mentionId ? String(mentionId) : entry.appid,
+      stripMention: scope === 'group',
+    })
 
     const data = {
       post_type: 'message',

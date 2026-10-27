@@ -101,6 +101,16 @@ adapter/
 components/QQBotAdmin.js  #hapi qqbot 子命令（仅主人）
 ```
 
+连接保活有三条互相独立的看门狗，不能合并成一个定时器：
+
+- **建连超时（20s）**：只在 `open` 之前有效，`open` 成功必须立刻清除。它衡量的是「多久连不上」，不是「这条连接能活多久」——混在一起就会变成每 20 秒主动掐断一条健康的连接，日志表现为固定的 20 秒一次「连接断开（timeout 连接网关超时）」。
+- **握手超时（30s）**：`open` 之后到 `READY` / `RESUMED` 之间有效，防止连上了却永远等不到握手。
+- **心跳回执**：心跳发出后连续两个周期没收到 `HEARTBEAT_ACK` 就判定 TCP 已假死，主动断开重连。只看 `readyState === OPEN` 不够——假死时状态照样是「在线」，但一条消息都收不到。
+
+另有一条 3 秒的 close 兜底：主动关闭时若对端不回 close 帧，直接 `terminate`，避免连接挂着永远不触发 `close` 事件。
+
+重连退避只由 `stop()` 提前唤醒，socket 的 `close` 事件绝不能顺手清掉退避定时器，否则退避形同虚设（变成 0.5 秒一次的密集重连）。
+
 账号表存在 `config/config/qqbot.yaml`，与 hapi 的 `state.json` 同目录，已在 `.gitignore` 覆盖范围内。
 
 三种会话的目标 ID 各不一样，`pickGroup` / `pickFriend` 负责还原：
@@ -120,4 +130,4 @@ components/QQBotAdmin.js  #hapi qqbot 子命令（仅主人）
 npm test
 ```
 
-`tests/qqbot.*.test.js` 覆盖：token 缓存与 401 重发、被动回复预算（群 5 次/私聊 4 次）、消息段拆块、markdown 降级顺序、引用 ID 提取、扫码解密与轮询状态机、入站去重与事件规范化。
+`tests/qqbot.*.test.js` 覆盖：token 缓存与 401 重发、被动回复预算（群 5 次/私聊 4 次）、消息段拆块、markdown 降级顺序、引用 ID 提取、扫码解密与轮询状态机、入站去重与事件规范化、网关看门狗（建连/握手/心跳回执）与重连退避。
