@@ -38,6 +38,51 @@ const INBOUND = {
   DIRECT_MESSAGE_CREATE: 'dm',
 }
 
+/** 日志里的场景名，跟云崽适配器的 `好友消息` / `群消息` 对齐，但官方 bot 没有好友，私聊就叫私聊 */
+const SCOPE_LABEL = {
+  c2c: '私聊消息',
+  group: '群消息',
+  channel: '频道消息',
+  dm: '频道私信',
+}
+
+/**
+ * 控制台配色。logger 是 chalk 实例（`lib/config/log.js` 里 `global.logger = chalk`），
+ * 测试环境只 stub 了基础方法，这里对缺失的颜色方法做兜底。
+ */
+function paint(color, text) {
+  const fn = logger?.[color]
+  return typeof fn === 'function' ? fn(String(text)) : String(text)
+}
+
+/** openid 有 32 位，日志里没必要铺满一行 */
+function shortId(id) {
+  const text = String(id || '')
+  return text.length > 8 ? `${text.slice(0, 8)}…` : text
+}
+
+/** 统一的 `[qqbot]` 前缀：蓝色标签 + 绿色 AppID */
+function tag(appid) {
+  const head = paint('blue', '[qqbot]')
+  return appid ? `${head} ${paint('green', appid)}` : head
+}
+
+/**
+ * 入站日志走云崽适配器的形状：`[qqbot][self <= 群, 用户] 群消息：[群名, 昵称] 正文`。
+ * 方括号前缀自己拼（`makeLog` 的 id 只能是一段），这样才能在 logUin 前面再挂一个 `[qqbot]`；
+ * 第三参传 false 让 makeLog 不重复包一层，级别过滤仍然生效。
+ */
+function logInbound(level, label, logUin, body) {
+  const msg = `${paint('blue', '[qqbot]')}${paint('blue', `[${logUin}]`)} ${paint('cyan', `${label}：`)}${body}`
+  const bot = globalThis.Bot
+  if (typeof bot?.makeLog === 'function') {
+    bot.makeLog(level, msg, false)
+    return
+  }
+  const fn = typeof logger?.[level] === 'function' ? logger[level] : logger.info
+  fn(msg)
+}
+
 /** 从平台事件里取出「往哪儿回」，scope 决定后面走哪个发送接口 */
 function resolveChat(scope, d) {
   if (scope === 'group') return { scope, id: String(d.group_openid || '') }
@@ -79,11 +124,11 @@ export class QQBotOfficialAdapter {
   async load() {
     const accounts = this.store.list()
     if (!accounts.length) {
-      logger.mark('[qqbot] 还没有机器人账号，使用 #hapi qqbot login 扫码添加')
+      logger.mark(`${tag('')} 还没有机器人账号，使用 #hapi qqbot login 扫码添加`)
     }
     for (const account of accounts) {
       if (!account.enabled) continue
-      this.login(account.appid).catch(err => logger.error(`[qqbot] 账号 ${account.appid} 登录失败：${err.message}`))
+      this.login(account.appid).catch(err => logger.error(`${tag(account.appid)} 登录失败：${err.message}`))
     }
 
     const exitHandler = () => {
@@ -124,7 +169,7 @@ export class QQBotOfficialAdapter {
       entry.ready = true
       entry.lastError = ''
       this.#mountBot(entry)
-      logger.mark(`[qqbot] ${id} 已连接`)
+      logger.mark(`${tag(id)} 已连接`)
     })
 
     gateway.on('resumed', () => {
@@ -133,27 +178,27 @@ export class QQBotOfficialAdapter {
       // 断线重连走的是 Resume，不会再收到 READY；Bot 对象如果被摘掉过（比如被判 fatal），
       // 这里补挂回来，否则会「连着但永远不会派发消息」。
       if (!entry.bot) this.#mountBot(entry)
-      logger.info(`[qqbot] ${id} 已恢复会话`)
+      logger.info(`${tag(id)} 已恢复会话`)
     })
 
     gateway.on('dispatch', (t, d) => {
       try {
         this.dispatch(entry, t, d)
       } catch (err) {
-        logger.error(`[qqbot] ${id} 处理 ${t} 失败：${err.message}`)
+        logger.error(`${tag(id)} 处理 ${t} 失败：${err.message}`)
       }
     })
 
     gateway.on('offline', (code, reason) => {
       entry.ready = false
       entry.lastError = `${code} ${reason}`.trim()
-      logger.warn(`[qqbot] ${id} 连接断开（${entry.lastError}），将自动重连`)
+      logger.warn(`${tag(id)} 连接断开（${entry.lastError}），将自动重连`)
     })
 
     gateway.on('fatal', (code, message) => {
       entry.ready = false
       entry.lastError = `${code}: ${message}`
-      logger.error(`[qqbot] ${id} 不可恢复：${message}`)
+      logger.error(`${tag(id)} 不可恢复：${message}`)
       this.#unmountBot(entry)
     })
 
@@ -513,7 +558,6 @@ export class QQBotOfficialAdapter {
     if (!messageId || this.#isDuplicate(entry, messageId)) return
 
     entry.lastInboundAt = Date.now()
-    logger.info(`[qqbot] ${entry.appid} 入站 ${t} #${messageId}`)
 
     const scope = kind
     const chat = resolveChat(scope, d)
@@ -533,9 +577,21 @@ export class QQBotOfficialAdapter {
       stripMention: scope === 'group',
     })
 
+    // 入站日志对齐云崽适配器的形状：`[self <= 群, 用户] 群消息：[群名, 昵称] 正文`
+    const text = String(plain || '').replace(/\s+/g, ' ')
+    const preview = text ? `${text.slice(0, 80)}${text.length > 80 ? '…' : ''}` : `[${segments.map(item => item.type).join(',') || '空'}]`
+    const nickname = d.author?.username || shortId(userId)
+    const inGroup = scope === 'group' || scope === 'channel'
+    // 方括号里放 id，正文方括号里放名字，和云崽适配器一致
+    const logUin = inGroup
+      ? `${entry.appid} <= ${shortId(chat.id)}, ${shortId(userId)}`
+      : `${entry.appid} <= ${shortId(userId)}`
+    const from = inGroup ? `[${d.group_name || shortId(chat.id)}, ${nickname}]` : `[${nickname}]`
+    logInbound('info', SCOPE_LABEL[scope] || t, logUin, `${from} ${preview}`)
+
     // 剥不掉的 @ 标记会让 `^#指令$` 整条失配，且现象是「毫无反应」，先把可疑内容打到日志里
     if (/^[ \t]*<(?:qqbot-at-user|<@!?)/i.test(plain)) {
-      logger.warn(`[qqbot] ${entry.appid} 入站文本以 @ 标记开头，按 AppID 剥不掉：${plain.slice(0, 60)}`)
+      logger.warn(`${tag(entry.appid)} 入站文本以 @ 标记开头，按 AppID 剥不掉：${plain.slice(0, 60)}`)
     }
 
     const data = {
