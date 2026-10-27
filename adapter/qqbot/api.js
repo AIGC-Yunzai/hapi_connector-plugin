@@ -25,6 +25,16 @@ function pickMessage(body) {
   return body.message || body.msg || body.err_msg || JSON.stringify(body)
 }
 
+const RETRY_DELAYS = [500, 1500]
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+/** 只有 5xx 与网络/超时才重试；4xx 重试没有意义 */
+function isRetryable(err) {
+  if (!(err instanceof QQBotApiError)) return false
+  return !err.status || err.status >= 500
+}
+
 /**
  * QQ 官方机器人 HTTP 客户端。
  * 一个实例对应一个机器人账号，token 在实例内缓存并在过期前 60s 刷新。
@@ -82,7 +92,25 @@ export class QQBotApi {
     this.expiresAt = 0
   }
 
-  async request(method, path, { json, query, timeout = DEFAULT_TIMEOUT_MS, retryAuth = true } = {}) {
+  /**
+   * 发请求。
+   *
+   * `retries` 只给「重试安全」的调用用：GET 元数据、素材上传。发送消息永远不传——
+   * 5xx / 超时可能已经送达，重发就是两条一样的消息（去重交给上层）。
+   */
+  async request(method, path, { json, query, timeout = DEFAULT_TIMEOUT_MS, retryAuth = true, retries = 0 } = {}) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.#requestOnce(method, path, { json, query, timeout, retryAuth })
+      } catch (err) {
+        if (attempt >= retries || !isRetryable(err)) throw err
+        // 500ms / 1.5s：目前最多两次重试，第三档不会用到
+        await sleep(RETRY_DELAYS[Math.min(attempt, RETRY_DELAYS.length - 1)])
+      }
+    }
+  }
+
+  async #requestOnce(method, path, { json, query, timeout, retryAuth }) {
     const url = new URL(`${API_BASE}${path}`)
     for (const [key, value] of Object.entries(query || {})) {
       if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value))
@@ -138,10 +166,25 @@ export class QQBotApi {
   }
 
   async getGatewayUrl() {
-    const body = await this.request('GET', GATEWAY_PATH, { retryAuth: true })
+    const body = await this.request('GET', GATEWAY_PATH, { retryAuth: true, retries: 2 })
     const url = body?.url
     if (!url) throw new QQBotApiError('获取网关地址失败：响应缺少 url', { path: GATEWAY_PATH, body })
     return url
+  }
+
+  /** 群信息：群名、成员数。事件里不一定带群名，缺的时候查这个 */
+  getGroupInfo(groupOpenid) {
+    return this.request('GET', `/v2/groups/${encodeURIComponent(groupOpenid)}/info`, { timeout: 2000 })
+  }
+
+  /** 子频道信息：频道名 */
+  getChannel(channelId) {
+    return this.request('GET', `/channels/${encodeURIComponent(channelId)}`, { timeout: 2000 })
+  }
+
+  /** 频道所属 guild：头像、创建者、成员数 */
+  getGuildInfo(guildId) {
+    return this.request('GET', `/guilds/${encodeURIComponent(guildId)}`, { timeout: 2000 })
   }
 
   /** 私聊：/v2/users/{openid}/messages */
@@ -174,6 +217,8 @@ export class QQBotApi {
     const body = await this.request('POST', `/v2/${kind}/${encodeURIComponent(targetId)}/files`, {
       json: payload,
       timeout: UPLOAD_TIMEOUT_MS,
+      // 上传不是发消息，重试不会产生重复消息；大文件超时后重来一次比直接失败好
+      retries: 2,
     })
     const fileInfo = body?.file_info || body?.data?.file_info
     if (!fileInfo) throw new QQBotApiError('上传素材失败：响应缺少 file_info', { body })

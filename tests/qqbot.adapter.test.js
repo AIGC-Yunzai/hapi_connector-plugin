@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { QQBotOfficialAdapter } from '../adapter/QQBotOfficial.js'
 import { PassiveReplyTracker } from '../adapter/qqbot/passive.js'
 import { RefIndex } from '../adapter/qqbot/refIndex.js'
+import { InfoCache } from '../adapter/qqbot/infoCache.js'
 import { QQBotApiError } from '../adapter/qqbot/api.js'
 
 // 适配器与云崽其它模块一样用全局 logger，纯 node 环境补一个最小实现
@@ -42,6 +43,7 @@ function makeEntry({ markdown = true, handler } = {}) {
     api,
     tracker: new PassiveReplyTracker(),
     refIndex: new RefIndex(),
+    infoCache: new InfoCache(),
     dedup: new Map(),
     dmTargets: new Map(),
     ready: true,
@@ -60,7 +62,7 @@ test('普通文本默认以 markdown 发送，主动发送不带 msg_id', async 
   assert.deepEqual(sent[0].payload, { markdown: { content: '你好' }, msg_type: 2 })
 })
 
-test('收到入站消息后自动挂 msg_id 与自增 msg_seq', async () => {
+test('收到入站消息后自动挂 msg_id 与自增 msg_seq，普通回复不自动引用', async () => {
   const { entry, sent } = makeEntry()
   const chat = { scope: 'group', id: 'G1' }
   entry.tracker.remember(chat, { messageId: 'IN-1', refIdx: 'REFIDX_1' })
@@ -71,7 +73,8 @@ test('收到入站消息后自动挂 msg_id 与自增 msg_seq', async () => {
   assert.equal(sent[0].payload.msg_id, 'IN-1')
   assert.equal(sent[0].payload.msg_seq, 1)
   assert.equal(sent[1].payload.msg_seq, 2)
-  assert.deepEqual(sent[0].payload.message_reference, { message_id: 'REFIDX_1' })
+  // 自动引用会把用户的触发消息再渲染一遍，官方 bot 显示在气泡里就像重复发送
+  assert.equal(sent[0].payload.message_reference, undefined)
 })
 
 test('一条消息带两个媒体时拆成两次请求，且都带图注', async () => {
@@ -124,6 +127,19 @@ test('被动回复失败时先改主动发送，不立刻降级 markdown', async
   assert.deepEqual(sent[1].payload.markdown, { content: 'hi' }, '第二次仍是 markdown')
 })
 
+test('5xx 与超时可能已送达，不再重发，避免同一条消息出现两次', async () => {
+  const { entry, sent } = makeEntry({
+    handler: () => {
+      throw new QQBotApiError('QQ 接口错误 [500] /x: internal error', { status: 500 })
+    },
+  })
+  const chat = { scope: 'c2c', id: 'U1' }
+  entry.tracker.remember(chat, { messageId: 'IN-9' })
+
+  await assert.rejects(() => adapter.sendTo(entry, chat, 'hi'), /500/)
+  assert.equal(sent.length, 1, '只尝试一次，不能改成主动发送再发一遍')
+})
+
 test('权限类错误不吞掉，直接抛给调用方', async () => {
   const { entry } = makeEntry({
     handler: () => {
@@ -167,12 +183,12 @@ function stubBot() {
   return emitted
 }
 
-test('群消息被规范化成 message.group.normal 并剥掉 @ 标记', () => {
+test('群消息被规范化成 message.group.normal 并剥掉 @ 标记', async () => {
   const emitted = stubBot()
   const { entry } = makeEntry()
   entry.bot = { info: { user_id: '102030405' } }
 
-  adapter.dispatch(entry, 'GROUP_AT_MESSAGE_CREATE', {
+  await adapter.dispatch(entry, 'GROUP_AT_MESSAGE_CREATE', {
     id: 'ROBOT1.0_abc',
     group_openid: 'G-OPENID',
     content: '<qqbot-at-user id="102030405" /> 帮我看看',
@@ -190,16 +206,19 @@ test('群消息被规范化成 message.group.normal 并剥掉 @ 标记', () => {
   assert.equal(data.user_id, 'M-1')
   assert.equal(data.isGroup, true)
   assert.equal(data.raw_message, '帮我看看')
-  assert.deepEqual(data.message[0], { type: 'text', text: '帮我看看' })
+  // 群 @ 事件要带 at 段，云崽才会置 e.atBot（onlyReplyAt=1 的群靠这个）
+  assert.deepEqual(data.message[0], { type: 'at', qq: '102030405' })
+  assert.deepEqual(data.message[1], { type: 'text', text: '帮我看看' })
+  assert.equal(data.time, 1700000000)
   assert.equal(data.bot, entry.bot)
 })
 
-test('派发时不预置 msg，云崽拼接 text 段后指令文本不会翻倍', () => {
+test('派发时不预置 msg，云崽拼接 text 段后指令文本不会翻倍', async () => {
   const emitted = stubBot()
   const { entry } = makeEntry()
   entry.bot = {}
 
-  adapter.dispatch(entry, 'GROUP_AT_MESSAGE_CREATE', {
+  await adapter.dispatch(entry, 'GROUP_AT_MESSAGE_CREATE', {
     id: 'ROBOT1.0_dup',
     group_openid: 'G-1',
     content: '#设置主人',
@@ -214,12 +233,12 @@ test('派发时不预置 msg，云崽拼接 text 段后指令文本不会翻倍'
   assert.equal(built, '#设置主人')
 })
 
-test('私聊消息派发成 message.private.normal，用户 id 取 user_openid', () => {
+test('私聊消息派发成 message.private.normal，用户 id 取 user_openid', async () => {
   const emitted = stubBot()
   const { entry } = makeEntry()
   entry.bot = {}
 
-  adapter.dispatch(entry, 'C2C_MESSAGE_CREATE', {
+  await adapter.dispatch(entry, 'C2C_MESSAGE_CREATE', {
     id: 'ROBOT1.0_c2c',
     content: '在吗',
     author: { user_openid: 'U-OPENID', username: '李四' },
@@ -231,35 +250,35 @@ test('私聊消息派发成 message.private.normal，用户 id 取 user_openid',
   assert.equal(emitted[0].data.isPrivate, true)
 })
 
-test('同一个 message_id 只派发一次（Resume 会重复投递）', () => {
+test('同一个 message_id 只派发一次（Resume 会重复投递）', async () => {
   const emitted = stubBot()
   const { entry } = makeEntry()
   entry.bot = {}
   const payload = { id: 'DUP-1', group_openid: 'G', content: 'x', author: { member_openid: 'M' }, attachments: [] }
 
-  adapter.dispatch(entry, 'GROUP_AT_MESSAGE_CREATE', payload)
-  adapter.dispatch(entry, 'GROUP_AT_MESSAGE_CREATE', payload)
+  await adapter.dispatch(entry, 'GROUP_AT_MESSAGE_CREATE', payload)
+  await adapter.dispatch(entry, 'GROUP_AT_MESSAGE_CREATE', payload)
 
   assert.equal(emitted.length, 1)
 })
 
-test('未订阅的事件类型被忽略，不抛错', () => {
+test('未订阅的事件类型被忽略，不抛错', async () => {
   const emitted = stubBot()
   const { entry } = makeEntry()
   entry.bot = {}
 
-  adapter.dispatch(entry, 'MESSAGE_REACTION_ADD', { id: 'x' })
-  adapter.dispatch(entry, 'INTERACTION_CREATE', { id: 'y' })
+  await adapter.dispatch(entry, 'MESSAGE_REACTION_ADD', { id: 'x' })
+  await adapter.dispatch(entry, 'INTERACTION_CREATE', { id: 'y' })
 
   assert.equal(emitted.length, 0)
 })
 
-test('入站后同会话发送自动带上该消息的 msg_id 与引用 ID', async () => {
+test('入站后同会话发送带上该消息的 msg_id，普通回复不再自动引用', async () => {
   const emitted = stubBot()
   const { entry, sent } = makeEntry()
   entry.bot = {}
 
-  adapter.dispatch(entry, 'GROUP_AT_MESSAGE_CREATE', {
+  await adapter.dispatch(entry, 'GROUP_AT_MESSAGE_CREATE', {
     id: 'IN-42',
     group_openid: 'G-1',
     content: 'hi',
@@ -272,6 +291,21 @@ test('入站后同会话发送自动带上该消息的 msg_id 与引用 ID', asy
   assert.equal(emitted.length, 1)
   assert.equal(sent[0].payload.msg_id, 'IN-42')
   assert.equal(sent[0].payload.msg_seq, 1)
+  // 没有显式引用就不带 message_reference，否则官方 bot 会把触发消息一起显示
+  assert.equal(sent[0].payload.message_reference, undefined)
+})
+
+test('e.reply(msg, true) 带上的本条消息 id 会换算成 REFIDX 并引用', async () => {
+  const { entry, sent } = makeEntry()
+  const chat = { scope: 'group', id: 'G-1' }
+  entry.tracker.remember(chat, { messageId: 'IN-42', refIdx: 'REFIDX_42' })
+
+  // 云崽的 loader.reply 在 quote=true 时会 unshift 一个 reply 段，id 就是本条入站消息
+  await adapter.sendTo(entry, chat, [
+    { type: 'reply', id: 'IN-42' },
+    { type: 'text', text: '收到' },
+  ])
+
   assert.deepEqual(sent[0].payload.message_reference, { message_id: 'REFIDX_42' })
 })
 
@@ -284,7 +318,7 @@ test('两个群各自持有 msg_id，不会串用', async () => {
     ['G-1', 'IN-G1'],
     ['G-2', 'IN-G2'],
   ]) {
-    adapter.dispatch(entry, 'GROUP_AT_MESSAGE_CREATE', {
+    await adapter.dispatch(entry, 'GROUP_AT_MESSAGE_CREATE', {
       id,
       group_openid: group,
       content: 'hi',
@@ -305,7 +339,7 @@ test('频道事件用 guild-channel 作 group_id，发送时不带 msg_type', as
   const { entry, sent } = makeEntry()
   entry.bot = {}
 
-  adapter.dispatch(entry, 'AT_MESSAGE_CREATE', {
+  await adapter.dispatch(entry, 'AT_MESSAGE_CREATE', {
     id: 'IN-CH',
     channel_id: 'C-1',
     guild_id: 'GU-1',
@@ -368,7 +402,7 @@ test('频道私信入站记住 user→guild 映射，回消息走 /dms 而不是
   const { entry, sent } = makeEntry()
   entry.bot = {}
 
-  adapter.dispatch(entry, 'DIRECT_MESSAGE_CREATE', {
+  await adapter.dispatch(entry, 'DIRECT_MESSAGE_CREATE', {
     id: 'IN-DM',
     guild_id: 'GU-DM',
     channel_id: 'C-DM',
@@ -438,7 +472,7 @@ test('引用机器人自己发过的消息：用发出时的 id 就能引用到'
   assert.deepEqual(sent[1].payload.message_reference, { message_id: 'REFIDX_out-1' })
 })
 
-test('引用未知的 ROBOT1.0 id 时仍回退到本条被动消息', async () => {
+test('引用未知的 ROBOT1.0 id 时按 ADR-0004 回退到本条被动消息', async () => {
   const { entry, sent } = makeEntry()
   const chat = { scope: 'group', id: 'G1' }
   entry.tracker.remember(chat, { messageId: 'IN-1', refIdx: 'REFIDX_self' })
@@ -485,4 +519,113 @@ test('频道里没给引用目标时不硬塞 message_reference', async () => {
 
   const channel = sent.find(item => item.scope === 'channel')
   assert.equal(channel.payload.message_reference, undefined)
+})
+
+test('频道 @ 消息剥掉 <@!id>，补 at 段，time 不再是 NaN', async () => {
+  const emitted = stubBot()
+  const { entry } = makeEntry()
+  entry.bot = {}
+
+  await adapter.dispatch(entry, 'AT_MESSAGE_CREATE', {
+    id: 'IN-CH-2',
+    channel_id: 'C-9',
+    guild_id: 'GU-9',
+    content: '<@!BOT-GUILD> #hapi status',
+    timestamp: '2026-10-28T02:20:00+08:00',
+    mentions: [{ id: 'BOT-GUILD', username: '云崽' }],
+    author: { id: 'U-9', username: '频道用户' },
+    attachments: [],
+  })
+
+  const { data } = emitted[0]
+  assert.deepEqual(data.message[0], { type: 'at', qq: '102030405' })
+  assert.equal(data.raw_message, '#hapi status')
+  assert.equal(data.time, Math.floor(Date.parse('2026-10-28T02:20:00+08:00') / 1000))
+})
+
+test('群名缺失时查一次 /info，写进 e.group_name 后走缓存', async () => {
+  const emitted = stubBot()
+  const { entry } = makeEntry()
+  entry.bot = {}
+  const calls = []
+  entry.api.getGroupInfo = async id => {
+    calls.push(id)
+    return { group_name: '测试群', group_member_num: 42 }
+  }
+
+  const payload = { group_openid: 'G-NAME', content: 'hi', author: { member_openid: 'M' }, attachments: [] }
+  await adapter.dispatch(entry, 'GROUP_AT_MESSAGE_CREATE', { ...payload, id: 'IN-GN-1' })
+  await adapter.dispatch(entry, 'GROUP_AT_MESSAGE_CREATE', { ...payload, id: 'IN-GN-2' })
+
+  assert.equal(calls.length, 1, '同一个群只查一次')
+  assert.equal(emitted[0].data.group_name, '测试群')
+  assert.equal(emitted[1].data.group_name, '测试群')
+  assert.equal(emitted[0].data.group_name, emitted[1].data.group_name)
+})
+
+test('群信息接口失败不影响消息派发', async () => {
+  const emitted = stubBot()
+  const { entry } = makeEntry()
+  entry.bot = {}
+  entry.api.getGroupInfo = async () => {
+    throw new Error('boom')
+  }
+
+  await adapter.dispatch(entry, 'GROUP_AT_MESSAGE_CREATE', {
+    id: 'IN-GFAIL',
+    group_openid: 'G-FAIL',
+    content: 'hi',
+    author: { member_openid: 'M' },
+    attachments: [],
+  })
+
+  assert.equal(emitted.length, 1)
+  assert.equal(emitted[0].data.group_name, undefined)
+})
+
+test('C2C 流式：state=1 追加，state=10 自动补换行并沿用 streamId', async () => {
+  const { entry, sent } = makeEntry()
+  const chat = { scope: 'c2c', id: 'U1' }
+
+  const first = await adapter.sendStream(entry, chat, { text: '你', state: 1, index: 0 })
+  assert.deepEqual(sent[0].payload.stream, { state: 1, index: 0, reset: false })
+  assert.equal(sent[0].payload.msg_type, 2)
+  assert.equal(first.streamId, 'msg-1')
+
+  await adapter.sendStream(entry, chat, { text: '好', state: 10, index: 1, streamId: first.streamId })
+  assert.equal(sent[1].payload.stream.id, 'msg-1')
+  assert.equal(sent[1].payload.stream.state, 10)
+  assert.equal(sent[1].payload.markdown.content, '好\n')
+})
+
+test('流式只支持私聊，群聊直接抛错', async () => {
+  const { entry } = makeEntry()
+  await assert.rejects(
+    () => adapter.sendStream(entry, { scope: 'group', id: 'G1' }, { text: 'x' }),
+    /只支持私聊/,
+  )
+})
+
+test('流式第一帧自动取被动凭据，后续帧复用同一对 msg_id/msg_seq', async () => {
+  const { entry, sent } = makeEntry()
+  const chat = { scope: 'c2c', id: 'U1' }
+  entry.tracker.remember(chat, { messageId: 'IN-STREAM', refIdx: 'REFIDX_STREAM' })
+
+  const first = await adapter.sendStream(entry, chat, { text: '你', state: 1, index: 0 })
+  assert.equal(sent[0].payload.msg_id, 'IN-STREAM')
+  assert.equal(sent[0].payload.msg_seq, 1)
+  assert.equal(first.messageId, 'IN-STREAM')
+  assert.equal(first.msgSeq, 1)
+
+  await adapter.sendStream(entry, chat, {
+    text: '好',
+    state: 10,
+    index: 1,
+    streamId: first.streamId,
+    messageId: first.messageId,
+    msgSeq: first.msgSeq,
+  })
+  assert.equal(sent[1].payload.msg_id, 'IN-STREAM')
+  assert.equal(sent[1].payload.msg_seq, 1, '后续帧沿用第一帧的序号，不重复消耗预算')
+  assert.equal(sent[1].payload.stream.id, first.streamId)
 })

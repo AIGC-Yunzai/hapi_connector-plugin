@@ -58,9 +58,21 @@
 
 **容器消息**：`message_type` 为 `101`（并行消息）、`102`（聊天记录，即客户端里的「合并转发」）、`103`（引用）时才会带 `msg_elements`。前两种的正文只在这个字段里，`content` 经常是空串；适配器会递归拍平成以 `[聊天记录]` / `[并行消息]` 开头的正文，元素内的图片、语音、视频、文件降级成 `[图片]` 等占位。不拍平的话派发出去就是一条空消息（`e.msg === ''`），表现和「没收到」一样。`103` 走引用分支，被引正文进 `reply` 段。
 
+入站字段与补全：
+
+- 媒体段同时带 `url` 与 `file`（绝对地址）。云崽 `loader.dealEvent` 只读 `image.url`，只给 `file` 会让 `e.img` 变成 `[undefined]`。
+- 群 / 频道的 @ 标记都会剥掉：群按 `mentions[].is_you` 的 id，频道在 `is_you` 缺失时退回 `mentions[0].id`。频道正文里的 `<@!id>` 不剥会让 `^#指令` 整条失配。
+- @ 事件额外补一个 `{ type: 'at', qq: AppID }` 段，云崽据此置 `e.atBot`；否则 `onlyReplyAt: 1` 的群 @ 了也不会响应。
+- `e.time` 按 RFC3339 解析成秒。官方 `timestamp` 是字符串，`Number()` 会得到 `NaN`。
+- 群名 / 频道名缺失时查 `/v2/groups/{openid}/info`、`/channels/{id}` 补全并写进 `e.group_name`；成功缓存 1 小时、失败 5 分钟。guild 的头像 / 人数在后台补，不阻塞首条消息派发；接口挂了只留空，不影响派发。
+- 频道引用不在 `msg_elements` 里，读 `message_reference.message_id` 生成 `reply` 段。
+- 入站语音在机器上有 ffmpeg 时转成 wav（可用 `QQBOT_FFMPEG` 指定路径）：转换成功只替换 `file`，`url` 仍是平台下发的绝对地址；转失败保留原 URL。临时 wav 保留 10 分钟供插件取用，之后删除。
+
 发送侧：
 
-- 普通文本默认走 **markdown**（`msg_type=2`）。平台拒绝时按 AstrBot 的顺序降级：先摘掉 `msg_id` 改主动发送，再退回 `content` 纯文本。
+- 普通文本默认走 **markdown**（`msg_type=2`）。平台明确拒绝（4xx）时按 AstrBot 的顺序降级：先摘掉 `msg_id` 改主动发送，再退回 `content` 纯文本。**5xx / 超时 / 429 / 403 不降级**——前两者可能已经送达，重发就是两条一样的消息；429 重发只会继续被限流；403 换主动发送也发不出去。
+- **重试只给「重试安全」的调用**：素材上传与网关地址在 5xx / 超时时重试两次（退避 500ms / 1.5s）；群名、频道名这类元数据查询**不重试**——它们只影响显示，重试会让首条消息多等一个超时。发消息永远不自动重试，去重交给上层。
+- **C2C 流式**：`sendStream(entry, chat, { text, state, index, streamId })`，`state=1` 追加、`state=10` 收尾（自动补 `\n`），只支持私聊。第一帧（`index=0`）自动从被动预算取一次凭据，返回值带 `messageId`/`msgSeq`，后续帧传回来即可续写同一条消息。节流、累积、工具中断由调用方负责，适配器只发一帧。
 - `segment.markdown({ content })` 无论账号开关如何都走 markdown。
 - 一条消息里出现多个媒体会被拆成多次请求——QQ 一条消息只能带一个富媒体。
 - 群聊/私聊的图片、语音、视频、文件走 `/v2/{users|groups}/{openid}/files` 上传，再以 `msg_type=7` 发出。
@@ -77,7 +89,7 @@
 | 发引用 | `segment.reply('REFIDX_...')` 直接生效；`e.reply(msg, true)`（云崽的「引用本条」）也能生效——`replyId` 是 `ROBOT1.0_` 形态时落回本条消息的 `msg_idx`。 |
 | 引用机器人自己发过的消息 | 发送成功时把响应里的 `id` 与 `ext_info.ref_idx` 记进进程内的发送索引（上限 500 条，写满后淘汰最早记入的那条），之后 `segment.reply(<那条消息的 message_id>)` 就能引用上去。`sendTo` 的返回值也带 `refIdx`，调用方可直接拿它当 `REFIDX` 用。索引不落盘，重启后这类引用退化为「引用本条」或「不引用」。 |
 | 频道 | 频道接口的引用参数就是被引消息的 `id` 本身（官方 Python SDK 示例为 `Reference(message_id=message.id)` + `post_message(channel_id=…)`），没有 `REFIDX` 这套，因此显式 id 原样使用。频道事件不带 `message_scene`，所以没有「引用本条」的默认值。 |
-| 默认行为 | 被动回复窗口内的每条回复都会带上 `message_reference` 指向触发那条消息，即**自动引用**（不额外限 300 秒，被动窗口本身就是群 5 分钟 / 私聊 60 分钟）。主动推送没有窗口，因此不引用。 |
+| 默认行为 | **只有显式引用才带 `message_reference`**：`e.reply(msg, true)`（云崽会塞一个本条消息 id 的 reply 段，适配器换算成 `REFIDX`）或 `segment.reply('REFIDX_...')`。普通回复不引用——官方 bot 会把引用内容渲染在气泡内部，默认引用看起来就像把用户的触发消息又发了一遍（OneBot 那边引用是独立小块，不明显）。 |
 
 ## 四、已知限制
 
@@ -85,7 +97,8 @@
 - **群消息**：只能收到 @ 机器人的消息，除非在手机 QQ 的机器人设置里开启「获取群内全部消息」。开启后官方提示可能影响 @ 消息接收，自行权衡。
 - **频道**：富媒体只支持图片（`image` / `file_image`），语音、视频、文件会被拒绝并抛错；markdown 在频道场景需要内邀。
 - **频道被动回复**：频道不参与被动回复预算，一律主动发送，因此频道回复不受 5 分钟窗口保护。
-- **语音**：不做 silk 转码，直接上传原始音频，部分格式可能被拒。
+- **语音**：出站不做 silk 转码，原样上传；入站会尽力转 wav（依赖 ffmpeg，缺失时保留原 URL）。
+- **流式**：官方只对 C2C 开放 `stream` 字段，群聊 / 频道没有流式；`sendStream` 因此只接受私聊。
 - **大文件**：超过 10MB 的分片上传尚未实现，当前会走单次上传并可能失败。
 - **按钮与交互回调**：未实现（AstrBot 同样未实现）。
 
@@ -96,10 +109,12 @@ adapter/
   QQBotOfficial.js       适配器与 Bot 对象、事件规范化、发送编排
   qqbot/
     constants.js         URL、opcode、intents、错误串
-    api.js               token 与 REST（含 401 重试、上传、ACK）
+    api.js               token 与 REST（含 401 换 token、5xx 重试、上传、群/频道信息）
     gateway.js           WebSocket：Hello/Identify/Resume/心跳/重连
     passive.js           msg_id + msg_seq 预算
     message.js           消息段 ↔ 平台 payload
+    infoCache.js         群/频道元数据缓存（1 小时 / 失败 5 分钟）
+    voice.js             入站语音转 wav（ffmpeg 可用时）
     onboard.js           扫码绑定与二维码渲染
     store.js             账号表（config/config/qqbot.yaml）
 components/QQBotAdmin.js  #hapi qqbot 子命令（仅主人）
@@ -134,4 +149,4 @@ components/QQBotAdmin.js  #hapi qqbot 子命令（仅主人）
 npm test
 ```
 
-`tests/qqbot.*.test.js` 覆盖：token 缓存与 401 重发、被动回复预算（群 5 次/私聊 4 次）、消息段拆块、markdown 降级顺序、引用 ID 提取、聊天记录/并行消息拍平、扫码解密与轮询状态机、入站去重与事件规范化、网关看门狗（建连/握手/心跳回执）与重连退避。
+`tests/qqbot.*.test.js` 覆盖：token 缓存与 401 重发、被动回复预算（群 5 次/私聊 4 次）、消息段拆块、markdown 降级顺序、5xx 不重发、引用 ID 提取与频道引用、聊天记录/并行消息拍平、入站媒体 url/at 段/time、群名缓存与失败兜底、语音转换开关、C2C 流式帧、扫码解密与轮询状态机、入站去重与事件规范化、网关看门狗（建连/握手/心跳回执）与重连退避。

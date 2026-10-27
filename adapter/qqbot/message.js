@@ -215,6 +215,18 @@ export function extractRefIdx(raw = {}) {
   return ''
 }
 
+/**
+ * 官方事件的 `timestamp` 是 RFC3339 字符串（`2026-10-28T02:20:00+08:00`）。
+ * 直接 `Number()` 会得到 NaN，`e.time` 就成了 NaN；这里兼容 RFC3339 与秒/毫秒时间戳。
+ */
+export function toUnixSeconds(value) {
+  if (value === undefined || value === null || value === '') return Math.floor(Date.now() / 1000)
+  const num = Number(value)
+  if (Number.isFinite(num)) return Math.floor(num > 1e11 ? num / 1000 : num)
+  const ms = Date.parse(String(value))
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : Math.floor(Date.now() / 1000)
+}
+
 function attachmentToSegment(att = {}) {
   const url = String(att.url || '')
   if (!url) return null
@@ -222,13 +234,16 @@ function attachmentToSegment(att = {}) {
   const name = att.filename || att.name || 'attachment'
   const ext = (name.match(/\.[^.]+$/) || [''])[0].toLowerCase()
   const absolute = /^https?:\/\//i.test(url) ? url : `https://${url.replace(/^\/+/, '')}`
+  // 云崽的 `e.img` 读的是 `url`（lib/plugins/loader.js:402），OneBot 适配器也只填 url。
+  // 只给 `file` 会让 `e.img` 变成 [undefined]，按核心字段取图的插件全都拿不到。
+  const common = { url: absolute, file: absolute, name }
 
-  if (type.startsWith('image')) return { type: 'image', file: absolute, name }
+  if (type.startsWith('image')) return { type: 'image', ...common }
   if (type.startsWith('voice') || type.startsWith('audio') || ['.mp3', '.wav', '.ogg', '.m4a', '.amr', '.silk', '.aac', '.speex', '.flac'].includes(ext))
-    return { type: 'record', file: absolute, name }
+    return { type: 'record', ...common }
   if (type.startsWith('video') || ['.mp4', '.mov', '.avi', '.mkv', '.webm'].includes(ext))
-    return { type: 'video', file: absolute, name }
-  return { type: 'file', file: absolute, name }
+    return { type: 'video', ...common }
+  return { type: 'file', ...common }
 }
 
 const MEDIA_LABEL = { image: '[图片]', record: '[语音]', video: '[视频]', file: '[文件]' }
@@ -265,14 +280,28 @@ function msgElementLines(elements, depth = 0) {
 /**
  * 入站事件 → { segments, plain, quote }。
  *
- * - 群消息剥掉 @ 机器人的标记；
- * - 引用消息（103）把被引内容并进消息链；
+ * - 群 / 频道消息剥掉 @ 机器人的标记；
+ * - `mentionSelf` 为真时补一个 `at` 段（云崽靠它置 `e.atBot`，否则 onlyReplyAt=1 的群不响应）；
+ * - 引用消息（103）把被引内容并进消息链，其它类型读 `message_reference`；
  * - 聊天记录 / 并行消息（102 / 101）把 `msg_elements` 递归拍平成正文。
  */
-export function eventToSegments(d = {}, { botId = '', stripMention = false } = {}) {
+export function eventToSegments(d = {}, {
+  botId = '',
+  stripMention = false,
+  mentionSelf = false,
+  mentionName = '',
+  selfId = '',
+} = {}) {
   const segments = []
   const quote = { id: '', text: '', name: '' }
   const type = Number(d.message_type || 0)
+
+  // 群 / 频道 @ 事件本身就以「被 @" 为前提，mentions 缺失时也要补 at 段
+  if (mentionSelf && selfId) {
+    const at = { type: 'at', qq: String(selfId) }
+    if (mentionName) at.name = String(mentionName)
+    segments.push(at)
+  }
 
   if (type === QUOTED_MESSAGE_TYPE && Array.isArray(d.msg_elements) && d.msg_elements.length) {
     const element = d.msg_elements[0] || {}
@@ -290,6 +319,13 @@ export function eventToSegments(d = {}, { botId = '', stripMention = false } = {
     for (const att of element.attachments || []) {
       const seg = attachmentToSegment(att)
       if (seg) segments.push(seg)
+    }
+  } else {
+    // 频道（guild）的引用不在 msg_elements 里，只有 message_reference
+    const refId = String(d.message_reference?.message_id || '')
+    if (refId) {
+      quote.id = refId
+      segments.push({ type: 'reply', id: refId })
     }
   }
 

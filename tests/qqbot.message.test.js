@@ -9,6 +9,7 @@ import {
   extractRefIdx,
   extractQuotedRefIdx,
   parseFaceMessage,
+  toUnixSeconds,
 } from '../adapter/qqbot/message.js'
 import { stripBotMention, computeIntents } from '../adapter/qqbot/constants.js'
 
@@ -306,4 +307,66 @@ test('extractQuotedRefIdx 只认 ref_msg_idx，不误取本条消息的 msg_idx'
     'REFIDX_q',
   )
   assert.equal(extractQuotedRefIdx({}), '')
+})
+
+test('入站附件同时带 url 与 file，e.img 才拿得到图', () => {
+  const { segments } = eventToSegments({
+    content: '',
+    attachments: [{ url: 'https://x/a.png', content_type: 'image/png', filename: 'a.png' }],
+  })
+  assert.equal(segments[0].type, 'image')
+  assert.equal(segments[0].url, 'https://x/a.png')
+  assert.equal(segments[0].file, 'https://x/a.png')
+
+  const stripped = eventToSegments({
+    content: '',
+    attachments: [{ url: '//x/b.png', content_type: 'image/png', filename: 'b.png' }],
+  })
+  assert.equal(stripped.segments[0].url, 'https://x/b.png', '协议相对地址补 https')
+})
+
+test('群 @ 事件补 at 段，selfId 用 AppID 以匹配 e.self_id', () => {
+  const { segments, plain } = eventToSegments(
+    {
+      content: '<@!BOT_OPENID> #hapi status',
+      mentions: [{ id: 'BOT_OPENID', is_you: true, username: '云崽' }],
+    },
+    {
+      botId: 'BOT_OPENID',
+      stripMention: true,
+      mentionSelf: true,
+      mentionName: '云崽',
+      selfId: '1906056872',
+    },
+  )
+
+  assert.deepEqual(segments[0], { type: 'at', qq: '1906056872', name: '云崽' })
+  assert.equal(plain, '#hapi status')
+  assert.deepEqual(segments[1], { type: 'text', text: '#hapi status' })
+})
+
+test('频道消息同样剥掉 <@!id>，否则频道里的指令匹配不上', () => {
+  const { plain } = eventToSegments(
+    { content: '<@!1234567890> #hapi status' },
+    { botId: '1234567890', stripMention: true },
+  )
+  assert.equal(plain, '#hapi status')
+})
+
+test('非引用消息也会读 message_reference，频道引用不再丢', () => {
+  const { segments, quote } = eventToSegments({
+    content: '看到了',
+    message_reference: { message_id: 'CH-MSG-1' },
+  })
+
+  assert.deepEqual(segments[0], { type: 'reply', id: 'CH-MSG-1' })
+  assert.equal(quote.id, 'CH-MSG-1')
+})
+
+test('时间戳兼容 RFC3339 与秒/毫秒，不再产出 NaN', () => {
+  const expected = Math.floor(Date.parse('2026-10-28T02:20:00+08:00') / 1000)
+  assert.equal(toUnixSeconds('2026-10-28T02:20:00+08:00'), expected)
+  assert.equal(toUnixSeconds('1700000000'), 1700000000)
+  assert.equal(toUnixSeconds(1700000000000), 1700000000)
+  assert.ok(Number.isFinite(toUnixSeconds(undefined)))
 })

@@ -4,6 +4,8 @@ import { QQBotApi, QQBotApiError } from './qqbot/api.js'
 import { QQBotGateway } from './qqbot/gateway.js'
 import { PassiveReplyTracker } from './qqbot/passive.js'
 import { RefIndex } from './qqbot/refIndex.js'
+import { InfoCache } from './qqbot/infoCache.js'
+import { convertVoiceToWav } from './qqbot/voice.js'
 import { accountStore } from './qqbot/store.js'
 import {
   segmentsToChunks,
@@ -11,6 +13,7 @@ import {
   buildMediaPayload,
   eventToSegments,
   extractRefIdx,
+  toUnixSeconds,
 } from './qqbot/message.js'
 import {
   FILE_TYPE,
@@ -155,6 +158,7 @@ export class QQBotOfficialAdapter {
       gateway,
       tracker: new PassiveReplyTracker(),
       refIndex: new RefIndex(),
+      infoCache: new InfoCache(),
       dedup: new Map(),
       // 频道私信按 guild 维度发送，但入站只有作者 user_id，这里记一笔 user → guild 的对应
       dmTargets: new Map(),
@@ -182,11 +186,9 @@ export class QQBotOfficialAdapter {
     })
 
     gateway.on('dispatch', (t, d) => {
-      try {
-        this.dispatch(entry, t, d)
-      } catch (err) {
+      this.dispatch(entry, t, d).catch(err => {
         logger.error(`${tag(id)} 处理 ${t} 失败：${err.message}`)
-      }
+      })
     })
 
     gateway.on('offline', (code, reason) => {
@@ -341,8 +343,17 @@ export class QQBotOfficialAdapter {
     const self = this
     // 频道联系人对外仍用 guild-channel 形态的 group_id，和入站事件里的 e.group_id 保持一致
     const groupId = chat.scope === 'channel' ? `${chat.guildId || ''}-${chat.id}` : chat.id
+    if (!chat.name && entry.infoCache) {
+      const key = this.#cacheKey(chat)
+      const info = key ? entry.infoCache.peek(key) : null
+      const name = info?.group_name || info?.name
+      if (name) chat.name = String(name)
+    }
     const contact = {
       ...chat,
+      // 云崽的 `prepareEvent` 用 group.name / group.group_name 填 e.group_name
+      name: chat.name || '',
+      group_name: chat.name || '',
       self_id: entry.appid,
       get user_id() {
         return chat.id
@@ -352,9 +363,14 @@ export class QQBotOfficialAdapter {
       },
       sendMsg: msg => self.sendTo(entry, chat, msg),
       sendFile: (file, name) => self.sendTo(entry, chat, { type: 'file', file, name }),
-      getInfo: async () => ({ user_id: chat.id, group_id: groupId }),
+      getInfo: async () => ({
+        user_id: chat.id,
+        group_id: groupId,
+        group_name: chat.name || '',
+        member_count: chat.memberCount,
+      }),
       getSimpleInfo: async () => ({ user_id: chat.id }),
-      getAvatarUrl: () => '',
+      getAvatarUrl: () => chat.avatar || '',
     }
     if (chat.scope === 'group') {
       contact.pickMember = memberId => self.#pickChat(entry, { scope: 'c2c', id: String(memberId) })
@@ -392,17 +408,70 @@ export class QQBotOfficialAdapter {
   }
 
   /**
+   * C2C 流式发送：一帧一帧发，`state=1` 追加、`state=10` 收尾。
+   *
+   * 和 AstrBot 的 `send_streaming` 对齐：
+   * - 只有私聊支持流式，群 / 频道请走普通 `sendTo`；
+   * - 收尾帧的正文必须以 `\n` 结束，否则平台会判定失败；
+   * - 第一帧（`index=0`）会自动从被动预算里取一次凭据，返回值带上 `messageId`/`msgSeq`，
+   *   后续帧把它们传回来即可续写同一条消息，不会重复消耗预算；
+   * - 节流、累积、工具中断由调用方负责，这里只发一帧。
+   *
+   * @returns 平台响应（带 `streamId`、`messageId`、`msgSeq`）
+   */
+  async sendStream(entry, chat, {
+    text = '',
+    state = 1,
+    streamId = '',
+    index = 0,
+    messageId = '',
+    msgSeq,
+    passive,
+  } = {}) {
+    if (chat.scope !== 'c2c') throw new Error('流式消息只支持私聊')
+
+    let credentials = passive
+    if (!messageId && !passive && index === 0 && entry.tracker) {
+      credentials = entry.tracker.take(chat)
+    }
+    const effectiveId = messageId || credentials?.messageId || ''
+    const effectiveSeq = msgSeq ?? credentials?.msgSeq
+
+    const content = state === 10 && text && !text.endsWith('\n') ? `${text}\n` : text
+    const payload = {
+      markdown: { content },
+      msg_type: MSG_TYPE.MARKDOWN,
+      stream: { state, index, reset: false },
+    }
+    if (streamId) payload.stream.id = String(streamId)
+    if (effectiveId) {
+      payload.msg_id = effectiveId
+      if (effectiveSeq) payload.msg_seq = effectiveSeq
+    }
+
+    const result = await this.#callSend(entry, chat, payload)
+    return {
+      ...result,
+      streamId: result?.id || streamId,
+      messageId: effectiveId,
+      msgSeq: effectiveSeq,
+    }
+  }
+
+  /**
    * 出站引用目标。
+   * - 没给引用目标就不引用：默认自动引用会把触发消息再显示一遍，
+   *   官方 bot 又把它渲染在气泡内部，看起来就是「同一条消息被发了两遍」；
    * - 显式给的 `REFIDX_` 直接用；
-   * - 频道接口的引用参数就是被引消息的 id 本身，没有 REFIDX 这套，也没有被动回复预算；
-   * - 其余形态先查发送索引（对应「引用机器人自己发过的消息」）；
-   * - 都没有就回退到本条被动消息，保住 `e.reply(msg, true)` 那条路径。
+   * - 其余显式 id 按 ADR-0004 的顺序查：发送索引 → 本条被动消息；
+   * - 频道接口的引用参数就是消息 id 本身，没有 REFIDX 这套。
    */
   #resolveRefIdx(entry, chat, replyId, passive) {
     const explicit = String(replyId || '')
     if (chat.scope === 'channel') return explicit
+    if (!explicit) return ''
     if (explicit.startsWith('REFIDX_')) return explicit
-    return (explicit && entry.refIndex.get(explicit)) || passive?.refIdx || ''
+    return entry.refIndex.get(explicit) || passive?.refIdx || ''
   }
 
   async #sendChunk(entry, chat, chunk) {
@@ -462,7 +531,11 @@ export class QQBotOfficialAdapter {
 
   /**
    * AstrBot 的降级顺序：先摘掉 msg_id 改主动发送，再在「不允许发送原生 markdown」时降为纯文本。
-   * 403/404/429 这类不降级，直接抛。
+   *
+   * 5xx / 超时 / 429 / 403 不降级：
+   * - 5xx 与超时可能已经送达，重发就是两条一样的消息；
+   * - 429 重发只会继续被限流；
+   * - 403 是权限问题，换成主动发送也发不出去。
    */
   async #sendWithFallback(entry, chat, payload, plainText) {
     try {
@@ -470,10 +543,13 @@ export class QQBotOfficialAdapter {
     } catch (err) {
       if (!(err instanceof QQBotApiError)) throw err
 
-      if (payload.msg_id) {
+      const noFallback = !err.status || err.status >= 500 || err.status === 429 || err.status === 403
+      if (payload.msg_id && !noFallback) {
         const fallback = { ...payload }
         delete fallback.msg_id
         delete fallback.msg_seq
+        // 主动消息没有被动回复窗口，带引用会被平台拒绝
+        delete fallback.message_reference
         try {
           const result = await this.#callSend(entry, chat, fallback)
           logger.info(`[qqbot] ${entry.appid} 被动回复失败，已改用主动发送`)
@@ -497,6 +573,12 @@ export class QQBotOfficialAdapter {
   }
 
   async #callSend(entry, chat, payload) {
+    // 出站留一行：重复发送时能直接看出是「发了两次」还是「一次发了双份内容」
+    const text = String(payload.markdown?.content ?? payload.content ?? '')
+    logger.info(
+      `${tag(entry.appid)} 发送 ${chat.scope} ${shortId(chat.id)} len=${text.length}` +
+      ` msg_id=${payload.msg_id || '-'} seq=${payload.msg_seq ?? '-'}`,
+    )
     const result = await this.#dispatchSend(entry.api, chat, payload)
     // 发送响应里的 ext_info.ref_idx 是这条消息的引用索引，
     // 记下来才能让「引用机器人自己发过的消息」找得到它。
@@ -543,7 +625,85 @@ export class QQBotOfficialAdapter {
     return uploaded
   }
 
-  dispatch(entry, t, d) {
+  /** 群 / 频道信息缓存的 key，入站与 pickGroup 共用一套 */
+  #cacheKey(chat) {
+    if (chat.scope === 'group') return `group:${chat.id}`
+    if (chat.scope === 'channel') return `channel:${chat.id}`
+    return ''
+  }
+
+  #applyGuild(chat, guild) {
+    chat.avatar = String(guild.icon || '')
+    chat.ownerId = String(guild.owner_id || '')
+    const count = Number(guild.member_count)
+    if (Number.isFinite(count)) chat.memberCount = count
+  }
+
+  /**
+   * 补全会话元数据：群名 / 频道名 / 成员数。
+   * 只有「当前消息要用到的名字」才阻塞等待；guild 头像/人数是锦上添花，
+   * 后台补进缓存，不拖慢首条消息的派发。
+   */
+  async #enrichChat(entry, chat, d) {
+    const fromEvent = String(d.group_name || d.channel_name || '').trim()
+    if (fromEvent) chat.name = fromEvent
+
+    if (chat.scope === 'group') {
+      if (!chat.name) {
+        const info = await entry.infoCache.get(this.#cacheKey(chat), async () => {
+          const data = await entry.api.getGroupInfo(chat.id)
+          // 没拿到群名按失败处理，5 分钟后再试，别把空结果缓存一小时
+          return data?.group_name ? data : null
+        })
+        if (info) {
+          chat.name = String(info.group_name || '').trim()
+          const count = Number(info.group_member_num ?? info.member_count)
+          if (Number.isFinite(count)) chat.memberCount = count
+        }
+      }
+      return
+    }
+
+    if (chat.scope === 'channel') {
+      if (!chat.name) {
+        const channel = await entry.infoCache.get(this.#cacheKey(chat), async () => {
+          const data = await entry.api.getChannel(chat.id)
+          return data?.name ? data : null
+        })
+        if (channel) chat.name = String(channel.name || '').trim()
+      }
+      if (chat.guildId) {
+        const key = `guild:${chat.guildId}`
+        const cached = entry.infoCache.peek(key)
+        if (cached) {
+          this.#applyGuild(chat, cached)
+        } else {
+          // 不 await：guild 信息只影响头像/人数，不能让它再拖 2 秒
+          entry.infoCache.get(key, () => entry.api.getGuildInfo(chat.guildId))
+            .then(guild => { if (guild) this.#applyGuild(chat, guild) })
+            .catch(() => {})
+        }
+      }
+      return
+    }
+
+    if (!chat.name && d.author?.username) chat.name = String(d.author.username)
+  }
+
+  /**
+   * 入站语音尽量转 wav；没有 ffmpeg 或转失败就保留原 URL。
+   * 转换成功只替换 `file`（本地 wav），`url` 仍是平台下发的绝对地址——
+   * 按 url 取音频的插件不受影响，按 file 取文件的插件拿到 wav。
+   */
+  async #prepareVoice(segments) {
+    for (const seg of segments) {
+      if (seg.type !== 'record' || !seg.url) continue
+      const wav = await convertVoiceToWav(seg.url, { timeoutMs: 5000 })
+      if (wav) seg.file = wav
+    }
+  }
+
+  async dispatch(entry, t, d) {
     const kind = INBOUND[t]
     if (!kind) return
     // 还没挂上 Bot 对象时派发出去，插件拿不到 e.reply，会直接炸。
@@ -563,19 +723,33 @@ export class QQBotOfficialAdapter {
     const chat = resolveChat(scope, d)
     if (!chat.id) return
 
+    // 被动回复凭据要在改 async 之前记好：后续查群名会 await，
+    // 连发两条时不能让后一条覆盖前一条的 msg_id / msg_seq 顺序。
     const refIdx = extractRefIdx(d)
     entry.tracker.remember(chat, { messageId, refIdx })
 
     const userId = resolveUserId(scope, d)
     if (scope === 'dm' && userId) this.#rememberDmTarget(entry, userId, chat.id)
 
-    // 群 @ 消息里的 @ 标记用的是机器人的 openid，不一定是 AppID；
-    // 事件里带了 mentions 就以 is_you 的 id 为准，和 AstrBot 的取法一致
-    const mentionId = (d.mentions || []).find(item => item?.is_you)?.id
+    if (entry.infoCache) await this.#enrichChat(entry, chat, d)
+
+    // 群 / 频道 @ 消息里的 @ 标记用的是机器人的 openid，不一定是 AppID；
+    // 事件里带了 mentions 就以 is_you 的 id 为准，和 AstrBot 的取法一致。
+    // 频道事件 AstrBot 直接取 mentions[0].id，这里作为 is_you 缺失时的兜底。
+    const mention = (d.mentions || []).find(item => item?.is_you)
+    const channelMention = scope === 'channel' ? d.mentions?.[0]?.id : ''
+    const mentionId = mention?.id || channelMention
+    const isAtEvent = t === 'GROUP_AT_MESSAGE_CREATE' || t === 'AT_MESSAGE_CREATE'
     const { segments, plain } = eventToSegments(d, {
       botId: mentionId ? String(mentionId) : entry.appid,
-      stripMention: scope === 'group',
+      stripMention: scope === 'group' || scope === 'channel',
+      // @ 事件本身就以「被 @」为前提，mentions 缺失也要补 at 段，
+      // 否则 onlyReplyAt=1 的群会因为 e.atBot 为 false 直接不响应
+      mentionSelf: isAtEvent || Boolean(mention),
+      mentionName: mention?.username || '',
+      selfId: entry.appid,
     })
+    await this.#prepareVoice(segments)
 
     // 入站日志对齐云崽适配器的形状：`[self <= 群, 用户] 群消息：[群名, 昵称] 正文`
     const text = String(plain || '').replace(/\s+/g, ' ')
@@ -586,7 +760,7 @@ export class QQBotOfficialAdapter {
     const logUin = inGroup
       ? `${entry.appid} <= ${shortId(chat.id)}, ${shortId(userId)}`
       : `${entry.appid} <= ${shortId(userId)}`
-    const from = inGroup ? `[${d.group_name || shortId(chat.id)}, ${nickname}]` : `[${nickname}]`
+    const from = inGroup ? `[${chat.name || shortId(chat.id)}, ${nickname}]` : `[${nickname}]`
     logInbound('info', SCOPE_LABEL[scope] || t, logUin, `${from} ${preview}`)
 
     // 剥不掉的 @ 标记会让 `^#指令$` 整条失配，且现象是「毫无反应」，先把可疑内容打到日志里
@@ -601,13 +775,14 @@ export class QQBotOfficialAdapter {
       message_id: messageId,
       user_id: userId,
       group_id: resolveGroupId(scope, chat),
+      group_name: chat.name || undefined,
       self_id: entry.appid,
       isGroup: scope === 'group' || scope === 'channel',
       isPrivate: scope === 'c2c' || scope === 'dm',
       message: segments,
       raw_message: plain,
       sender: { user_id: userId, nickname: d.author?.username || '', card: d.author?.username || '' },
-      time: Math.floor(Number(d.timestamp || Date.now() / 1000)),
+      time: toUnixSeconds(d.timestamp),
       raw: d,
       bot: entry.bot,
     }
