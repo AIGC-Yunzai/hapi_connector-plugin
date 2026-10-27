@@ -236,6 +236,69 @@ test('没有引用内容时不会凭空产生 reply 段', () => {
   assert.deepEqual(quote, { id: '', text: '', name: '' })
 })
 
+test('聊天记录（message_type=102）拍平成正文，不再变成空消息', () => {
+  // 转发聊天记录时 content 是空的，正文全在 msg_elements 里；
+  // 不拍平的话派发出去就是 e.msg === ''，表现成「机器人毫无反应」
+  const { segments, plain } = eventToSegments({
+    message_type: 102,
+    content: '',
+    msg_elements: [
+      { content: '=== 消息 1 ===\n[发送者] 甲\n[消息内容] 你好' },
+      {
+        content: '=== 消息 2 ===\n[发送者] 乙\n[消息内容] 在吗',
+        attachments: [{ url: 'https://x/a.png', content_type: 'image/png', filename: 'a.png' }],
+      },
+    ],
+  })
+
+  assert.equal(segments.length, 1, '应该产出正文段，而不是空消息')
+  assert.equal(segments[0].type, 'text')
+  assert.ok(plain.startsWith('[聊天记录]'))
+  assert.ok(plain.includes('你好') && plain.includes('在吗'))
+  assert.ok(plain.includes('[图片]'), '记录里的图片降级成占位')
+})
+
+test('聊天记录的结构化元素补发送者，嵌套的 msg_elements 递归展开', () => {
+  const { plain } = eventToSegments({
+    message_type: 102,
+    msg_elements: [
+      { content: '外层', author: { username: '甲' } },
+      {
+        content: '内层',
+        author: { nickname: '乙' },
+        msg_elements: [{ content: '更深一层', author: { username: '丙' } }],
+      },
+    ],
+  })
+
+  assert.ok(plain.includes('甲：外层'))
+  assert.ok(plain.includes('乙：内层'))
+  assert.ok(plain.includes('丙：更深一层'))
+})
+
+test('聊天记录的 content 只是摘要时不重复拼一遍', () => {
+  const { plain } = eventToSegments({
+    message_type: 102,
+    content: '[聊天记录]',
+    msg_elements: [{ content: '正文' }],
+  })
+  assert.equal(plain, '[聊天记录]\n正文')
+})
+
+test('并行消息（message_type=101）同样拍平，标题用 [并行消息]', () => {
+  const { plain } = eventToSegments({
+    message_type: 101,
+    msg_elements: [{ content: '一' }, { content: '二' }],
+  })
+  assert.equal(plain, '[并行消息]\n一\n二')
+})
+
+test('普通文本消息不会被容器消息的解析影响', () => {
+  const { plain, segments } = eventToSegments({ message_type: 0, content: '在吗' })
+  assert.equal(plain, '在吗')
+  assert.deepEqual(segments, [{ type: 'text', text: '在吗' }])
+})
+
 test('extractQuotedRefIdx 只认 ref_msg_idx，不误取本条消息的 msg_idx', () => {
   assert.equal(extractQuotedRefIdx({ message_scene: { ext: ['msg_idx=REFIDX_self'] } }), '')
   assert.equal(

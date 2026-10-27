@@ -105,7 +105,12 @@ export const RATE_LIMIT_RECONNECT_MS = 60000
 export const DEDUP_WINDOW_MS = 5 * 60 * 1000
 export const DEDUP_MAX_SIZE = 1000
 
-/** 引用消息的魔法值：message_type === 103 才带 msg_elements */
+/**
+ * 入站消息里会带 msg_elements 的三种 message_type。
+ * 101=并行消息，102=聊天记录（客户端里的「合并转发」），103=引用消息。
+ */
+export const PARALLEL_MESSAGE_TYPE = 101
+export const RECORD_MESSAGE_TYPE = 102
 export const QUOTED_MESSAGE_TYPE = 103
 
 /** markdown 被平台拒绝时返回的错误串（AstrBot 逐字对齐） */

@@ -1,6 +1,8 @@
 import {
   MSG_TYPE,
   MAX_CONTENT_LENGTH,
+  PARALLEL_MESSAGE_TYPE,
+  RECORD_MESSAGE_TYPE,
   QUOTED_MESSAGE_TYPE,
   atMarkup,
   stripBotMention,
@@ -229,15 +231,50 @@ function attachmentToSegment(att = {}) {
   return { type: 'file', file: absolute, name }
 }
 
+const MEDIA_LABEL = { image: '[图片]', record: '[语音]', video: '[视频]', file: '[文件]' }
+
 /**
- * 入站事件 → { segments, plain, quote, attachments }。
- * 群消息剥掉 @ 机器人的标记；引用消息（message_type=103）把被引内容并进消息链。
+ * 聊天记录 / 并行消息里的元素 → 一行行可读文本。
+ *
+ * 这两个类型的正文不在 `content` 里（`content` 常常是空串），而在 `msg_elements` 中，
+ * 且元素本身还可能再带 `msg_elements`（递归结构）。不拍平的话派发出去就是一条空消息，
+ * 插件看到 `e.msg === ''`，现象是「转发了聊天记录，机器人毫无反应」。
+ *
+ * QQ 有时已经把它渲染成 `=== 消息 N === / [发送者] 昵称 / [消息内容]` 的模板串，
+ * 这种正文里已经带了发送者，不再重复补名字。
+ */
+function msgElementLines(elements, depth = 0) {
+  if (!Array.isArray(elements) || depth > 5) return []
+  const lines = []
+  for (const element of elements) {
+    if (!element || typeof element !== 'object') continue
+    const content = parseFaceMessage(String(element.content ?? '').trim())
+    const name = String(element.author?.username || element.author?.nickname || '').trim()
+    if (content) lines.push(name && !content.includes('[发送者]') ? `${name}：${content}` : content)
+    for (const att of element.attachments || []) {
+      const seg = attachmentToSegment(att)
+      if (seg) lines.push(MEDIA_LABEL[seg.type] || `[${seg.type}]`)
+    }
+    if (Array.isArray(element.msg_elements) && element.msg_elements.length) {
+      lines.push(...msgElementLines(element.msg_elements, depth + 1))
+    }
+  }
+  return lines
+}
+
+/**
+ * 入站事件 → { segments, plain, quote }。
+ *
+ * - 群消息剥掉 @ 机器人的标记；
+ * - 引用消息（103）把被引内容并进消息链；
+ * - 聊天记录 / 并行消息（102 / 101）把 `msg_elements` 递归拍平成正文。
  */
 export function eventToSegments(d = {}, { botId = '', stripMention = false } = {}) {
   const segments = []
   const quote = { id: '', text: '', name: '' }
+  const type = Number(d.message_type || 0)
 
-  if (Number(d.message_type || 0) === QUOTED_MESSAGE_TYPE && Array.isArray(d.msg_elements) && d.msg_elements.length) {
+  if (type === QUOTED_MESSAGE_TYPE && Array.isArray(d.msg_elements) && d.msg_elements.length) {
     const element = d.msg_elements[0] || {}
     // 被引用消息的 REFIDX 有两个来源：message_scene.ext 的 ref_msg_idx 语义最直白，
     // 元素自身的 msg_idx 次之，id/message_id 是历史写法。
@@ -259,6 +296,19 @@ export function eventToSegments(d = {}, { botId = '', stripMention = false } = {
   let plain = String(d.content || '')
   if (stripMention && botId) plain = stripBotMention(plain, botId)
   plain = parseFaceMessage(plain.trim())
+
+  // 101 / 102 是容器消息：正文在 msg_elements 里，content 经常是空的或只有一句摘要
+  if (type === RECORD_MESSAGE_TYPE || type === PARALLEL_MESSAGE_TYPE) {
+    const lines = msgElementLines(d.msg_elements)
+    if (lines.length) {
+      const head = type === RECORD_MESSAGE_TYPE ? '[聊天记录]' : '[并行消息]'
+      const body = [head, ...lines].join('\n')
+      // content 只是平台给的摘要（例如「[聊天记录]」）时不要跟在后面重复一遍
+      const isSummary = !plain || plain === '[聊天记录]' || plain === '[并行消息]' || plain === head
+      plain = isSummary ? body : `${body}\n${plain}`
+    }
+  }
+
   if (plain) segments.push({ type: 'text', text: plain })
 
   for (const att of d.attachments || []) {
