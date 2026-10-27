@@ -86,7 +86,7 @@ async function qqbotLogin(e, args, reply) {
     }
   }
 
-  await reply('正在申请扫码绑定，二维码马上发来…')
+  await reply('正在申请扫码绑定，二维码马上发来…\n 1. 如果未创建 QQ Bot ，在扫码后先创建 QQ Bot ，然后再扫一次码，即可绑定\n 2. 如果已经有 QQ Bot ，则扫码绑定即可')
 
   let result
   try {
